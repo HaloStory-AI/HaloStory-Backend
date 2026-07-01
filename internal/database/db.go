@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 
@@ -26,6 +27,18 @@ func NewDB(cfg *config.Config) *gorm.DB {
 	if err != nil {
 		log.Fatalf("failed to connect database: %v", err)
 	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatalf("failed to get underlying sql.DB: %v", err)
+	}
+
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.DBMaxLifetime))
+
+	log.Printf("database pool: max_open=%d max_idle=%d max_lifetime=%v",
+		cfg.DBMaxOpenConns, cfg.DBMaxIdleConns, cfg.DBMaxLifetime)
 
 	return db
 }

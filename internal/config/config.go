@@ -10,18 +10,21 @@ import (
 )
 
 type Config struct {
-	AppName    string
-	AppURL     string
-	AppDebug   bool
-	JWTSecret  string
+	AppName   string
+	AppURL    string
+	AppDebug  bool
+	JWTSecret string
 	JWTTTL    time.Duration
-	TimeZone   string
+	TimeZone  string
 
-	DBHost     string
-	DBPort     string
-	DBDatabase string
-	DBUsername string
-	DBPassword string
+	DBHost         string
+	DBPort         string
+	DBDatabase     string
+	DBUsername     string
+	DBPassword     string
+	DBMaxOpenConns int
+	DBMaxIdleConns int
+	DBMaxLifetime  time.Duration
 
 	RedisAddr     string
 	RedisPassword string
@@ -40,18 +43,18 @@ type Config struct {
 	S3Bucket   string
 	S3Endpoint string
 
-	DiscordWebhookURL        string
+	DiscordWebhookURL         string
 	DiscordChildSafetyWebhook string
 
 	TelegramBotToken string
 	TelegramUserID   string
 
-	AISystemKeys map[string]string
+	AISystemKeys     map[string]string
 	AIPriorityModels []string
-	AIChainTimeout    time.Duration
-	AIRequestTimeout  time.Duration
-	AIStreamTimeout   time.Duration
-	AIMaxTokens       int
+	AIChainTimeout   time.Duration
+	AIRequestTimeout time.Duration
+	AIStreamTimeout  time.Duration
+	AIMaxTokens      int
 
 	StaticToken string
 	CallVideos  []string
@@ -61,18 +64,21 @@ func Load() *Config {
 	godotenv.Load()
 
 	cfg := &Config{
-		AppName:    getEnv("APP_NAME", "HaloStory"),
-		AppURL:     getEnv("APP_URL", "http://localhost:18000"),
-		AppDebug:   getEnvBool("APP_DEBUG", false),
-		JWTSecret:  getEnv("JWT_SECRET", "change-me"),
+		AppName:   getEnv("APP_NAME", "HaloStory"),
+		AppURL:    getEnv("APP_URL", "http://localhost:18000"),
+		AppDebug:  getEnvBool("APP_DEBUG", false),
+		JWTSecret: getEnv("JWT_SECRET", "change-me"),
 		JWTTTL:    getEnvDuration("JWT_TTL_HOURS", 168*time.Hour),
-		TimeZone:   getEnv("TIMEZONE", "Asia/Jakarta"),
+		TimeZone:  getEnv("TIMEZONE", "Asia/Jakarta"),
 
-		DBHost:     getEnv("DB_HOST", "127.0.0.1"),
-		DBPort:     getEnv("DB_PORT", "3306"),
-		DBDatabase: getEnv("DB_DATABASE", "bluetalk"),
-		DBUsername: getEnv("DB_USERNAME", "root"),
-		DBPassword: getEnv("DB_PASSWORD", ""),
+		DBHost:         getEnv("DB_HOST", "127.0.0.1"),
+		DBPort:         getEnv("DB_PORT", "3306"),
+		DBDatabase:     getEnv("DB_DATABASE", "bluetalk"),
+		DBUsername:     getEnv("DB_USERNAME", "root"),
+		DBPassword:     getEnv("DB_PASSWORD", ""),
+		DBMaxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 25),
+		DBMaxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 10),
+		DBMaxLifetime:  getEnvDuration("DB_MAX_LIFETIME", 5*time.Minute),
 
 		RedisAddr:     getEnv("REDIS_ADDR", "127.0.0.1:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
@@ -91,21 +97,21 @@ func Load() *Config {
 		S3Bucket:   getEnv("S3_BUCKET", "bluetalk"),
 		S3Endpoint: getEnv("S3_ENDPOINT", "https://rustfs.aneent.dev"),
 
-		DiscordWebhookURL:        getEnv("DISCORD_WEBHOOK_URL", ""),
+		DiscordWebhookURL:         getEnv("DISCORD_WEBHOOK_URL", ""),
 		DiscordChildSafetyWebhook: getEnv("DISCORD_CHILD_SAFETY_WEBHOOK", ""),
 
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramUserID:   getEnv("TELEGRAM_USER_ID", ""),
 
 		AISystemKeys: map[string]string{
-			"gemini":          getEnv("AI_GEMINI_KEYS", ""),
-			"gemini_priority": getEnv("AI_GEMINI_PRIORITY_KEYS", ""),
-			"groq":            getEnv("AI_GROQ_KEYS", ""),
-			"openrouter":      getEnv("AI_OPENROUTER_KEYS", ""),
-			"mistral":         getEnv("AI_MISTRAL_KEYS", ""),
-			"cerebras":        getEnv("AI_CEREBRAS_KEYS", ""),
-			"cohere":          getEnv("AI_COHERE_KEYS", ""),
-			"huashang":        getEnv("AI_HUASHANG_KEYS", ""),
+			"gemini":            getEnv("AI_GEMINI_KEYS", ""),
+			"gemini_priority":   getEnv("AI_GEMINI_PRIORITY_KEYS", ""),
+			"groq":              getEnv("AI_GROQ_KEYS", ""),
+			"openrouter":        getEnv("AI_OPENROUTER_KEYS", ""),
+			"mistral":           getEnv("AI_MISTRAL_KEYS", ""),
+			"cerebras":          getEnv("AI_CEREBRAS_KEYS", ""),
+			"cohere":            getEnv("AI_COHERE_KEYS", ""),
+			"huashang":          getEnv("AI_HUASHANG_KEYS", ""),
 			"huashang_priority": getEnv("AI_HUASHANG_PRIORITY_KEYS", ""),
 		},
 		AIPriorityModels: splitEnv(getEnv("AI_PRIORITY_MODELS", "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash")),
