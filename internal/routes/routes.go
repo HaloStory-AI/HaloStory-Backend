@@ -107,7 +107,7 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 	api.Get("/user/restore", middleware.JWTAuth(cfg), middleware.BannedCheck(db), backup.Restore)
 
 	// ── Admin (JWT + role=admin) ──
-\tadmin := handlers.NewAdminHandler(db, cfg, cache)
+	admin := handlers.NewAdminHandler(db, cfg, cache)
 	adminGroup := api.Group("/admin", middleware.JWTAuth(cfg), middleware.AdminOnly())
 	adminGroup.Get("/users", admin.GetUsers)
 	adminGroup.Put("/users/:id/role", admin.ChangeUserRole)
