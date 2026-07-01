@@ -57,7 +57,7 @@ func (h *CategoryHandler) Bots(c *fiber.Ctx) error {
 
 	type categoryBotsResponse struct {
 		models.Category
-		Bots []models.BotListResponse `json:"bots"`
+		Bots []models.BotListResponse `json:"Bots"`
 	}
 
 	return c.JSON(fiber.Map{"category": categoryBotsResponse{

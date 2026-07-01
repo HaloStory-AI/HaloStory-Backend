@@ -8,16 +8,16 @@ import (
 )
 
 type Category struct {
-	ID       uint   `gorm:"primaryKey;autoIncrement"`
-	Name     string `gorm:"type:varchar(255);not null"`
-	Slug     string `gorm:"type:varchar(255);uniqueIndex;not null"`
-	LogoURL  *string `gorm:"type:varchar(255)"`
-	Pinned   bool   `gorm:"type:tinyint(1);default:0"`
-	Featured bool   `gorm:"type:tinyint(1);default:0"`
+	ID        uint    `gorm:"primaryKey;autoIncrement"`
+	Name      string  `gorm:"type:varchar(255);not null"`
+	Slug      string  `gorm:"type:varchar(255);uniqueIndex;not null"`
+	LogoURL   *string `gorm:"type:varchar(255)"`
+	Pinned    bool    `gorm:"type:tinyint(1);default:0"`
+	Featured  bool    `gorm:"type:tinyint(1);default:0"`
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
-	Bots []Bot `gorm:"foreignKey:CategorySlug;references:Slug"`
+	Bots []Bot `gorm:"foreignKey:CategorySlug;references:Slug" json:"-"`
 }
 
 func (c *Category) BeforeCreate(tx *gorm.DB) error {

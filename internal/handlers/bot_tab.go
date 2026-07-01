@@ -42,7 +42,7 @@ func (h *BotTabHandler) Index(c *fiber.Ctx) error {
 
 	type categoryResponse struct {
 		models.Category
-		Bots []models.BotListResponse `json:"bots"`
+		Bots []models.BotListResponse `json:"Bots"`
 	}
 	result := make([]categoryResponse, len(categories))
 	for i, cat := range categories {
