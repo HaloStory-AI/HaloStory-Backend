@@ -10,17 +10,18 @@ services:
       - SSH_TUNNEL_PASSWORD=${SSH_TUNNEL_PASSWORD}
       - REMOTE_MYSQL_HOST=${REMOTE_MYSQL_HOST:-127.0.0.1}
       - REMOTE_MYSQL_PORT=${REMOTE_MYSQL_PORT:-3306}
-    command: >
-      sh -c "
-        apk add --no-cache autossh sshpass &&
-        sshpass -p '$${SSH_TUNNEL_PASSWORD}' autossh -M 0
-          -o StrictHostKeyChecking=no
-          -o ServerAliveInterval=30
-          -o ServerAliveCountMax=3
-          -o ExitOnForwardFailure=yes
-          -L 0.0.0.0:3306:$${REMOTE_MYSQL_HOST}:$${REMOTE_MYSQL_PORT}
-          -N $${SSH_TUNNEL_USER}@$${SSH_TUNNEL_HOST}
-      "
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache autossh sshpass
+        sshpass -p "${SSH_TUNNEL_PASSWORD}" autossh -M 0 \
+          -o StrictHostKeyChecking=no \
+          -o ServerAliveInterval=30 \
+          -o ServerAliveCountMax=3 \
+          -o ExitOnForwardFailure=yes \
+          -L 0.0.0.0:3306:${REMOTE_MYSQL_HOST}:${REMOTE_MYSQL_PORT} \
+          -N ${SSH_TUNNEL_USER}@${SSH_TUNNEL_HOST}
     healthcheck:
       test: ["CMD-SHELL", "ss -tln | grep -q ':3306'"]
       interval: 10s
