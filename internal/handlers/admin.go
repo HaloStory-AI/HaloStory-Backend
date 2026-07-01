@@ -17,12 +17,14 @@ type AdminHandler struct {
 	db      *gorm.DB
 	cfg     *config.Config
 	discord *services.DiscordService
+	cache   *services.CacheService
 }
 
-func NewAdminHandler(db *gorm.DB, cfg *config.Config) *AdminHandler {
+func NewAdminHandler(db *gorm.DB, cfg *config.Config, cache *services.CacheService) *AdminHandler {
 	return &AdminHandler{
 		db:      db,
 		cfg:     cfg,
+		cache:   cache,
 		discord: services.NewDiscordService(cfg),
 	}
 }
@@ -132,6 +134,15 @@ func (h *AdminHandler) GetBots(c *fiber.Ctx) error {
 }
 
 // POST /admin/bots
+func (h *AdminHandler) invalidateBotCache() {
+	if h.cache != nil {
+		h.cache.InvalidateCache(
+			services.CacheKey("bot-tab"),
+			services.CacheKey("categories"),
+		)
+	}
+}
+
 func (h *AdminHandler) StoreBot(c *fiber.Ctx) error {
 	bot := new(models.Bot)
 	if err := c.BodyParser(bot); err != nil {
@@ -142,6 +153,7 @@ func (h *AdminHandler) StoreBot(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to create bot: " + err.Error()})
 	}
 
+	h.invalidateBotCache()
 	return c.Status(201).JSON(fiber.Map{"bot": bot})
 }
 
@@ -187,6 +199,7 @@ func (h *AdminHandler) ImportBots(c *fiber.Ctx) error {
 		imported++
 	}
 
+	h.invalidateBotCache()
 	return c.JSON(fiber.Map{"imported": imported})
 }
 
@@ -205,6 +218,7 @@ func (h *AdminHandler) UpdateBot(c *fiber.Ctx) error {
 	}
 
 	h.db.Model(&bot).Updates(updates)
+	h.invalidateBotCache()
 	return c.JSON(fiber.Map{"bot": bot})
 }
 
@@ -217,6 +231,7 @@ func (h *AdminHandler) DeleteBot(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Bot not found"})
 	}
 
+	h.invalidateBotCache()
 	return c.JSON(fiber.Map{"message": "Bot deleted"})
 }
 

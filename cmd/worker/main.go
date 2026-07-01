@@ -6,8 +6,8 @@ import (
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 	"rafiq8k-moga/halostory-go-backend/internal/database"
-	byokJob "rafiq8k-moga/halostory-go-backend/internal/jobs"
 	"rafiq8k-moga/halostory-go-backend/internal/jobs"
+	byokJob "rafiq8k-moga/halostory-go-backend/internal/jobs"
 
 	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
@@ -53,6 +53,9 @@ func main() {
 
 	byokProcessor := byokJob.NewBYOKChatProcessor(db, cfg, rdb)
 	mux.HandleFunc(byokJob.TypeBYOKChat, byokProcessor.ProcessTask)
+
+	cacheProcessor := jobs.NewCacheInvalidationProcessor(rdb)
+	mux.HandleFunc(jobs.TypeCacheInvalidation, cacheProcessor.ProcessTask)
 
 	log.Printf("worker starting, connected to redis at %s", cfg.RedisAddr)
 	log.Fatal(server.Run(mux))

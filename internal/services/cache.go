@@ -60,6 +60,50 @@ func (s *CacheService) ResetCircuit(provider string) {
 	s.rdb.Del(context.Background(), key)
 }
 
+// Cache response helpers — stores pre-marshaled JSON
+const (
+	CacheTTLPublic  = 5 * time.Minute
+	CacheTTLPrivate = 2 * time.Minute
+	CachePrefix     = "halostory:cache:"
+)
+
+func CacheKey(name string) string {
+	return CachePrefix + name
+}
+
+// CacheResponse stores JSON bytes in Redis with a TTL.
+// Returns true if stored, false if Redis is unavailable.
+func (s *CacheService) CacheResponse(key string, data []byte, ttl time.Duration) bool {
+	if s.rdb == nil {
+		return false
+	}
+	return s.rdb.Set(context.Background(), key, data, ttl).Err() == nil
+}
+
+// GetCachedResponse retrieves cached JSON bytes from Redis.
+// Returns nil if miss or Redis unavailable.
+func (s *CacheService) GetCachedResponse(key string) []byte {
+	if s.rdb == nil {
+		return nil
+	}
+	data, err := s.rdb.Get(context.Background(), key).Bytes()
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// InvalidateCache removes one or more cache keys.
+func (s *CacheService) InvalidateCache(keys ...string) {
+	if s.rdb == nil {
+		return
+	}
+	ctx := context.Background()
+	for _, key := range keys {
+		s.rdb.Del(ctx, key)
+	}
+}
+
 func (s *CacheService) GetKeyIndex(provider string) (int, error) {
 	key := fmt.Sprintf("halostory:vip_key_idx:%s", provider)
 	n, err := s.rdb.Get(context.Background(), key).Int()

@@ -5,6 +5,7 @@ import (
 	"rafiq8k-moga/halostory-go-backend/internal/handlers"
 	byokHandler "rafiq8k-moga/halostory-go-backend/internal/handlers/byok"
 	"rafiq8k-moga/halostory-go-backend/internal/middleware"
+	"rafiq8k-moga/halostory-go-backend/internal/services"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
@@ -12,6 +13,7 @@ import (
 )
 
 func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client) {
+	cache := services.NewCacheService(rdb)
 	api := app.Group("/api")
 
 	// ── Public ──
@@ -78,12 +80,12 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 	api.Post("/v1/calendar", middleware.JWTAuth(cfg), middleware.BannedCheck(db), cal.Index)
 
 	// ── Categories ──
-	cat := handlers.NewCategoryHandler(db)
+	cat := handlers.NewCategoryHandler(db, cache)
 	api.Get("/v1/categories", middleware.JWTAuth(cfg), middleware.BannedCheck(db), cat.Index)
 	api.Get("/v1/category/:slug", middleware.JWTAuth(cfg), middleware.BannedCheck(db), cat.Bots)
 
 	// ── Bot Tab ──
-	botTab := handlers.NewBotTabHandler(db)
+	botTab := handlers.NewBotTabHandler(db, cache)
 	api.Get("/v1/bot-tab", middleware.JWTAuth(cfg), middleware.BannedCheck(db), botTab.Index)
 
 	// ── Bot Bio ──
@@ -105,7 +107,7 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 	api.Get("/user/restore", middleware.JWTAuth(cfg), middleware.BannedCheck(db), backup.Restore)
 
 	// ── Admin (JWT + role=admin) ──
-	admin := handlers.NewAdminHandler(db, cfg)
+\tadmin := handlers.NewAdminHandler(db, cfg, cache)
 	adminGroup := api.Group("/admin", middleware.JWTAuth(cfg), middleware.AdminOnly())
 	adminGroup.Get("/users", admin.GetUsers)
 	adminGroup.Put("/users/:id/role", admin.ChangeUserRole)
