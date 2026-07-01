@@ -14,10 +14,24 @@ func BannedCheck(db *gorm.DB) fiber.Handler {
 			return c.Next()
 		}
 
+		if user, ok := c.Locals("user").(*models.User); ok && user != nil && user.ID == userID {
+			if user.IsBanned() {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"message":      "Akun Anda telah dibanned.",
+					"reason":       user.BanReason,
+					"banned_until": user.BannedUntil,
+				})
+			}
+			return c.Next()
+		}
+
 		var user models.User
 		if err := db.First(&user, userID).Error; err != nil {
 			return c.Next()
 		}
+
+		// Store in locals so subsequent handlers don't re-query
+		c.Locals("user", &user)
 
 		if user.IsBanned() {
 			var bannedUntil *string

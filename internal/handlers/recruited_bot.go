@@ -29,17 +29,17 @@ func (h *RecruitedBotHandler) Index(c *fiber.Ctx) error {
 	}
 
 	type recruitedBot struct {
-		Bot        models.Bot `json:"bot"`
-		Level      int        `json:"level"`
-		Xp         int64      `json:"xp"`
-		BondStatus string     `json:"bond_status"`
-		CreatedAt  string     `json:"created_at"`
+		Bot        models.BotListResponse `json:"bot"`
+		Level      int                    `json:"level"`
+		Xp         int64                  `json:"xp"`
+		BondStatus string                 `json:"bond_status"`
+		CreatedAt  string                 `json:"created_at"`
 	}
 
 	result := make([]recruitedBot, 0, len(bonds))
 	for _, b := range bonds {
 		result = append(result, recruitedBot{
-			Bot:        *b.Bot,
+			Bot:        models.BotToListResponse(b.Bot),
 			Level:      b.Level(),
 			Xp:         b.Xp,
 			BondStatus: b.GetStatus(),

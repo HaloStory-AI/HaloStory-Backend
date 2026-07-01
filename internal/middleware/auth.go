@@ -4,16 +4,17 @@ import (
 	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
+	"rafiq8k-moga/halostory-go-backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
 type UserClaims struct {
-	Sub          uint   `json:"sub"`
-	Role         string `json:"role"`
-	IsVip        bool   `json:"is_vip"`
-	EmailVerified bool  `json:"email_verified"`
+	Sub           uint   `json:"sub"`
+	Role          string `json:"role"`
+	IsVip         bool   `json:"is_vip"`
+	EmailVerified bool   `json:"email_verified"`
 	jwt.RegisteredClaims
 }
 
@@ -83,6 +84,13 @@ func IsVip(c *fiber.Ctx) bool {
 		return v
 	}
 	return false
+}
+
+func GetUserFromLocals(c *fiber.Ctx) *models.User {
+	if user, ok := c.Locals("user").(*models.User); ok {
+		return user
+	}
+	return nil
 }
 
 func GenerateJWT(cfg *config.Config, userID uint, role string, isVip bool, emailVerified bool) (string, error) {

@@ -40,7 +40,19 @@ func (h *BotTabHandler) Index(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch bot tab"})
 	}
 
-	data := fiber.Map{"categories": categories}
+	type categoryResponse struct {
+		models.Category
+		Bots []models.BotListResponse `json:"bots"`
+	}
+	result := make([]categoryResponse, len(categories))
+	for i, cat := range categories {
+		result[i] = categoryResponse{
+			Category: cat,
+			Bots:     models.BotsToListResponse(cat.Bots),
+		}
+	}
+
+	data := fiber.Map{"categories": result}
 
 	// Store in cache
 	if h.cache != nil {

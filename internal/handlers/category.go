@@ -55,5 +55,13 @@ func (h *CategoryHandler) Bots(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "Category not found"})
 	}
 
-	return c.JSON(fiber.Map{"category": category, "bots": category.Bots})
+	type categoryBotsResponse struct {
+		models.Category
+		Bots []models.BotListResponse `json:"bots"`
+	}
+
+	return c.JSON(fiber.Map{"category": categoryBotsResponse{
+		Category: category,
+		Bots:     models.BotsToListResponse(category.Bots),
+	}})
 }

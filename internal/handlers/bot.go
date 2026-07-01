@@ -25,14 +25,14 @@ func (h *BotHandler) Index(c *fiber.Ctx) error {
 	}
 
 	type botResponse struct {
-		Bot                models.Bot     `json:"bot"`
-		Level              int            `json:"level"`
-		Xp                 int64          `json:"xp"`
-		RequiredXP         int            `json:"required_xp"`
-		BondStatus         string         `json:"bond_status"`
-		RelationshipLabel  string         `json:"relationship_label"`
-		Emotion            string         `json:"emotion"`
-		HasPendingChoice   bool           `json:"has_pending_choice"`
+		Bot               models.BotListResponse `json:"bot"`
+		Level             int                    `json:"level"`
+		Xp                int64                  `json:"xp"`
+		RequiredXP        int                    `json:"required_xp"`
+		BondStatus        string                 `json:"bond_status"`
+		RelationshipLabel string                 `json:"relationship_label"`
+		Emotion           string                 `json:"emotion"`
+		HasPendingChoice  bool                   `json:"has_pending_choice"`
 	}
 
 	result := make([]botResponse, 0, len(bonds))
@@ -40,7 +40,7 @@ func (h *BotHandler) Index(c *fiber.Ctx) error {
 		level := b.Level()
 		status := b.GetStatus()
 		result = append(result, botResponse{
-			Bot:               *b.Bot,
+			Bot:               models.BotToListResponse(b.Bot),
 			Level:             level,
 			Xp:                b.Xp,
 			RequiredXP:        b.RequiredXPForLevel(level + 1),

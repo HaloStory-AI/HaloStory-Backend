@@ -20,10 +20,10 @@ import (
 )
 
 type AuthHandler struct {
-	db     *gorm.DB
-	cfg    *config.Config
-	rdb    *redis.Client
-	email  *services.EmailService
+	db    *gorm.DB
+	cfg   *config.Config
+	rdb   *redis.Client
+	email *services.EmailService
 }
 
 func NewAuthHandler(db *gorm.DB, cfg *config.Config, rdb *redis.Client) *AuthHandler {
@@ -75,11 +75,11 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Name     string  `json:"name"`
-		Email    string  `json:"email"`
-		Password string  `json:"password"`
-		PasswordConfirmation string `json:"password_confirmation"`
-		DeviceID *string `json:"device_id"`
+		Name                 string  `json:"name"`
+		Email                string  `json:"email"`
+		Password             string  `json:"password"`
+		PasswordConfirmation string  `json:"password_confirmation"`
+		DeviceID             *string `json:"device_id"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -201,6 +201,12 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 // GET /user
 func (h *AuthHandler) GetUser(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
+
+	// Use cached user from middleware if available
+	if user := middleware.GetUserFromLocals(c); user != nil && user.ID == userID {
+		return c.JSON(user)
+	}
+
 	var user models.User
 	if err := h.db.First(&user, userID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"message": "User not found"})
@@ -345,9 +351,9 @@ func (h *AuthHandler) ForgotPassword(c *fiber.Ctx) error {
 // POST /reset-password
 func (h *AuthHandler) ResetPassword(c *fiber.Ctx) error {
 	var req struct {
-		Email           string `json:"email"`
-		OTP             string `json:"otp"`
-		Password        string `json:"password"`
+		Email                string `json:"email"`
+		OTP                  string `json:"otp"`
+		Password             string `json:"password"`
 		PasswordConfirmation string `json:"password_confirmation"`
 	}
 	if err := c.BodyParser(&req); err != nil {
