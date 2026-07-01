@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 	"rafiq8k-moga/halostory-go-backend/internal/models"
@@ -21,10 +22,10 @@ const (
 )
 
 type SystemAIChatPayload struct {
-	UUID   string `json:"uuid"`
-	UserID uint   `json:"user_id"`
-	BotID  string `json:"bot_id"`
-	IsGroup bool  `json:"is_group"`
+	UUID    string `json:"uuid"`
+	UserID  uint   `json:"user_id"`
+	BotID   string `json:"bot_id"`
+	IsGroup bool   `json:"is_group"`
 }
 
 func NewSystemAIChatTask(uuid string, userID uint, botID string, isGroup bool) (*asynq.Task, error) {
@@ -37,15 +38,15 @@ func NewSystemAIChatTask(uuid string, userID uint, botID string, isGroup bool) (
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeSystemAIChat, payload, asynq.MaxRetry(3), asynq.Timeout(240)), nil
+	return asynq.NewTask(TypeSystemAIChat, payload, asynq.MaxRetry(3), asynq.Timeout(240*time.Second)), nil
 }
 
 type SystemAIChatProcessor struct {
-	db     *gorm.DB
-	cfg    *config.Config
-	rdb    *redis.Client
+	db       *gorm.DB
+	cfg      *config.Config
+	rdb      *redis.Client
 	fallback *ai.FallbackChainService
-	cache  *services.CacheService
+	cache    *services.CacheService
 }
 
 func NewSystemAIChatProcessor(db *gorm.DB, cfg *config.Config, rdb *redis.Client) *SystemAIChatProcessor {
@@ -79,7 +80,7 @@ func (p *SystemAIChatProcessor) ProcessTask(ctx context.Context, task *asynq.Tas
 
 	jobDataMap["status"] = "processing"
 	p.rdb.Set(ctx, chatKey, toJSON(jobDataMap), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 
 	// Create UserActivity
 	p.db.Create(&models.UserActivity{UserID: payload.UserID})
@@ -200,16 +201,16 @@ func (p *SystemAIChatProcessor) handleChat(ctx context.Context, payload SystemAI
 	}
 
 	response := map[string]interface{}{
-		"status":       "completed",
-		"content":      content,
-		"model":        model,
-		"bond_event":   bondEvent,
-		"bond_status":  bondStatus,
-		"http_status":  200,
+		"status":      "completed",
+		"content":     content,
+		"model":       model,
+		"bond_event":  bondEvent,
+		"bond_status": bondStatus,
+		"http_status": 200,
 	}
 
 	p.rdb.Set(ctx, chatKey, toJSON(response), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 
 	return nil
 }
@@ -232,7 +233,7 @@ func (p *SystemAIChatProcessor) handleSummarization(ctx context.Context, payload
 	}
 
 	p.rdb.Set(ctx, chatKey, toJSON(response), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 
 	return nil
 }
@@ -244,7 +245,7 @@ func (p *SystemAIChatProcessor) markError(ctx context.Context, chatKey string, e
 		"http_status": 500,
 	}
 	p.rdb.Set(ctx, chatKey, toJSON(response), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 	return fmt.Errorf("%s", errMsg)
 }
 

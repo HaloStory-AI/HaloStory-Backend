@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 	"rafiq8k-moga/halostory-go-backend/internal/jobs"
@@ -75,16 +76,16 @@ func (h *BYOKHandler) Chat(c *fiber.Ctx) error {
 
 	// Build payload for Redis
 	payload := map[string]interface{}{
-		"status":     "queued",
-		"user_id":    userID,
-		"bot_id":     "",
-		"is_summarize": false,
-		"is_byok":    true,
-		"provider":   provider,
-		"api_key":    encryptedKey,
+		"status":            "queued",
+		"user_id":           userID,
+		"bot_id":            "",
+		"is_summarize":      false,
+		"is_byok":           true,
+		"provider":          provider,
+		"api_key":           encryptedKey,
 		"api_key_encrypted": true,
-		"model":      req.Model,
-		"messages":   messagesB64,
+		"model":             req.Model,
+		"messages":          messagesB64,
 	}
 
 	if req.BaseURL != nil {
@@ -130,7 +131,7 @@ func (h *BYOKHandler) Chat(c *fiber.Ctx) error {
 	payloadBytes, _ := json.Marshal(payload)
 	chatKey := fmt.Sprintf("halostory:chat:%s", uid)
 	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 0)
-	h.rdb.Expire(c.Context(), chatKey, 600)
+	h.rdb.Expire(c.Context(), chatKey, 600*time.Second)
 
 	if h.client != nil {
 		task, err := jobs.NewBYOKChatTask(uid, userID, provider)

@@ -76,6 +76,10 @@ func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 	isVip := middleware.IsVip(c)
 
+	if h.rdb == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Redis not available"})
+	}
+
 	messagesJSON, _ := json.Marshal(req.Messages)
 
 	payload := map[string]interface{}{
@@ -117,7 +121,9 @@ func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 
 	payloadBytes, _ := json.Marshal(payload)
 	chatKey := fmt.Sprintf("halostory:chat:%s", uid)
-	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute)
+	if err := h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute).Err(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to store chat"})
+	}
 
 	if h.client != nil {
 		task, err := jobs.NewSystemAIChatTask(uid, userID, req.BotID, req.IsGroup != nil && *req.IsGroup)
@@ -179,7 +185,9 @@ func (h *AIHandler) Summarize(c *fiber.Ctx) error {
 
 	payloadBytes, _ := json.Marshal(payload)
 	chatKey := fmt.Sprintf("halostory:chat:%s", uid)
-	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute)
+	if err := h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute).Err(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to store chat"})
+	}
 
 	if h.client != nil {
 		task, err := jobs.NewSystemAIChatTask(uid, userID, botID, false)
@@ -199,6 +207,9 @@ func (h *AIHandler) ChatStatus(c *fiber.Ctx) error {
 	uuid := c.Params("uuid")
 	if uuid == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "UUID is required"})
+	}
+	if h.rdb == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Redis not available"})
 	}
 
 	chatKey := fmt.Sprintf("halostory:chat:%s", uuid)

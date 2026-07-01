@@ -35,7 +35,7 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 	// ── JWT Auth (allow banned users for device reporting) ──
 	api.Post("/user/report-banned-device", middleware.JWTAuth(cfg), auth.ReportBannedDevice)
 
-	// ── JWT Auth + Banned Check ──
+	// ── JWT Auth + Banned Check ──76
 	// ── JWT Auth + Banned Check ──
 	api.Get("/user", middleware.JWTAuth(cfg), middleware.BannedCheck(db), auth.GetUser)
 	api.Post("/email/verify/send", middleware.JWTAuth(cfg), middleware.BannedCheck(db), auth.SendVerificationOTP)

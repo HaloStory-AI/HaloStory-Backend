@@ -41,6 +41,9 @@ func (h *BotHandler) Index(c *fiber.Ctx) error {
 
 	result := make([]botResponse, 0, len(bonds))
 	for _, b := range bonds {
+		if b.Bot == nil {
+			continue
+		}
 		level := b.Level()
 		status := b.GetStatus()
 		result = append(result, botResponse{

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 	"rafiq8k-moga/halostory-go-backend/internal/models"
@@ -35,7 +36,7 @@ func NewBYOKChatTask(uuid string, userID uint, provider string) (*asynq.Task, er
 	if err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeBYOKChat, payload, asynq.MaxRetry(3), asynq.Timeout(180)), nil
+	return asynq.NewTask(TypeBYOKChat, payload, asynq.MaxRetry(3), asynq.Timeout(180*time.Second)), nil
 }
 
 type BYOKChatProcessor struct {
@@ -73,7 +74,7 @@ func (p *BYOKChatProcessor) ProcessTask(ctx context.Context, task *asynq.Task) e
 
 	jobData["status"] = "processing"
 	p.rdb.Set(ctx, chatKey, toJSON(jobData), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 
 	// Decrypt API key
 	encryptedKey, _ := jobData["api_key"].(string)
@@ -166,7 +167,7 @@ func (p *BYOKChatProcessor) ProcessTask(ctx context.Context, task *asynq.Task) e
 
 	apiPayload := buildPayload(providerReq, string(providerReqMsg))
 	headers := map[string]string{
-		"Content-Type": "application/json",
+		"Content-Type":  "application/json",
 		"Authorization": providerCfg.AuthHeader(apiKey),
 	}
 
@@ -219,15 +220,15 @@ func (p *BYOKChatProcessor) ProcessTask(ctx context.Context, task *asynq.Task) e
 	}
 
 	response := map[string]interface{}{
-		"status":     "completed",
-		"content":    content,
-		"model":      model,
-		"bond_event": bondEvent,
+		"status":      "completed",
+		"content":     content,
+		"model":       model,
+		"bond_event":  bondEvent,
 		"http_status": 200,
 	}
 
 	p.rdb.Set(ctx, chatKey, toJSON(response), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 
 	return nil
 }
@@ -239,7 +240,7 @@ func (p *BYOKChatProcessor) markError(ctx context.Context, chatKey string, errMs
 		"http_status": 500,
 	}
 	p.rdb.Set(ctx, chatKey, toJSON(response), 0)
-	p.rdb.Expire(ctx, chatKey, 600)
+	p.rdb.Expire(ctx, chatKey, 600*time.Second)
 	return fmt.Errorf("%s", errMsg)
 }
 
