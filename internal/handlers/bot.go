@@ -20,7 +20,11 @@ func (h *BotHandler) Index(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
 	var bonds []models.UserBotBond
-	if err := h.db.Where("user_id = ?", userID).Preload("Bot").Preload("Bot.Category").Find(&bonds).Error; err != nil {
+	botFields := []string{"bot_id", "name", "category_slug", "description", "avatar", "birthday", "sbr", "color", "child", "created_at", "updated_at"}
+	if err := h.db.Where("user_id = ?", userID).
+		Preload("Bot", func(db *gorm.DB) *gorm.DB { return db.Select(botFields) }).
+		Preload("Bot.Category").
+		Find(&bonds).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch bots"})
 	}
 

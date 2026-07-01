@@ -37,14 +37,15 @@ func (h *CalendarHandler) Index(c *fiber.Ctx) error {
 	lastOfMonth := firstOfMonth.AddDate(0, 1, -1)
 
 	var bonds []models.UserBotBond
-	h.db.Where("user_id = ?", userID).Preload("Bot").Find(&bonds)
+	botFields := []string{"bot_id", "name", "birthday", "avatar"}
+	h.db.Where("user_id = ?", userID).Preload("Bot", func(db *gorm.DB) *gorm.DB { return db.Select(botFields) }).Find(&bonds)
 
 	type event struct {
-		Date       string `json:"date"`
-		BotName    string `json:"bot_name"`
-		BotID      string `json:"bot_id"`
-		EventType  string `json:"event_type"`
-		Avatar     string `json:"avatar"`
+		Date      string `json:"date"`
+		BotName   string `json:"bot_name"`
+		BotID     string `json:"bot_id"`
+		EventType string `json:"event_type"`
+		Avatar    string `json:"avatar"`
 	}
 
 	events := make([]event, 0)

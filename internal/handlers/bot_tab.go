@@ -31,9 +31,10 @@ func (h *BotTabHandler) Index(c *fiber.Ctx) error {
 	}
 
 	var categories []models.Category
+	botFields := []string{"bot_id", "name", "category_slug", "description", "avatar", "birthday", "sbr", "color", "child", "created_at", "updated_at"}
 	if err := h.db.Where("pinned = ? OR featured = ?", true, true).
 		Preload("Bots", func(db *gorm.DB) *gorm.DB {
-			return db.Order("name asc")
+			return db.Select(botFields).Order("name asc")
 		}).
 		Order("pinned desc, name asc").
 		Find(&categories).Error; err != nil {

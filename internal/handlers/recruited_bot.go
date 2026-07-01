@@ -20,8 +20,9 @@ func (h *RecruitedBotHandler) Index(c *fiber.Ctx) error {
 	userID := middleware.GetUserID(c)
 
 	var bonds []models.UserBotBond
+	botFields := []string{"bot_id", "name", "category_slug", "description", "avatar", "birthday", "sbr", "color", "child", "created_at", "updated_at"}
 	if err := h.db.Where("user_id = ?", userID).
-		Preload("Bot").
+		Preload("Bot", func(db *gorm.DB) *gorm.DB { return db.Select(botFields) }).
 		Preload("Bot.Category").
 		Order("created_at desc").
 		Find(&bonds).Error; err != nil {

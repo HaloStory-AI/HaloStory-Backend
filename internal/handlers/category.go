@@ -51,7 +51,10 @@ func (h *CategoryHandler) Bots(c *fiber.Ctx) error {
 	slug := c.Params("slug")
 
 	var category models.Category
-	if err := h.db.Where("slug = ?", slug).Preload("Bots").First(&category).Error; err != nil {
+	botFields := []string{"bot_id", "name", "category_slug", "description", "avatar", "birthday", "sbr", "color", "child", "created_at", "updated_at"}
+	if err := h.db.Where("slug = ?", slug).
+		Preload("Bots", func(db *gorm.DB) *gorm.DB { return db.Select(botFields) }).
+		First(&category).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "Category not found"})
 	}
 
