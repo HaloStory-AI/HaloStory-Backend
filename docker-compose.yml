@@ -31,6 +31,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: hsai-redis
     ports:
       - "6389:6379"
     volumes:
@@ -46,6 +47,7 @@ services:
     build:
       context: .
       target: server
+    container_name: hsai-app
     ports:
       - "18000:18000"
     env_file:
@@ -61,6 +63,7 @@ services:
     build:
       context: .
       target: worker
+    container_name: hsai-worker
     env_file:
       - .env
     depends_on:
@@ -74,6 +77,7 @@ services:
     build:
       context: .
       target: scheduler
+    container_name: hsai-scheduler
     env_file:
       - .env
     depends_on:
