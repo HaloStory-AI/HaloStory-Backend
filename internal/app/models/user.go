@@ -21,3 +21,18 @@ type User struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
+
+// HasActiveBan mengecek apakah user sedang dibanned secara aktif.
+// Dinamakan HasActiveBan agar tidak bentrok dengan field IsBanned.
+func (u *User) HasActiveBan() bool {
+	if !u.IsBanned {
+		return false
+	}
+
+	// Jika ada batas waktu dan sudah lewat, berarti ban sudah selesai
+	if u.BannedUntil != nil && u.BannedUntil.Before(time.Now()) {
+		return false
+	}
+
+	return true
+}

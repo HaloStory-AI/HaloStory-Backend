@@ -42,6 +42,21 @@ func Login(c *fiber.Ctx) error {
 		})
 	}
 
+	// Cek apakah user sedang dibanned
+	if user.HasActiveBan() {
+		var bannedUntilStr *string
+		if user.BannedUntil != nil {
+			str := user.BannedUntil.Format("2006-01-02T15:04:05Z07:00") // Format RFC3339
+			bannedUntilStr = &str
+		}
+
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"message":      "Akun Anda telah dibanned.",
+			"reason":       user.BanReason,
+			"banned_until": bannedUntilStr,
+		})
+	}
+
 	// Generate JWT Token menggunakan APP_KEY dari .env
 	tokenString, err := utils.GenerateJWT(user.ID)
 	if err != nil {

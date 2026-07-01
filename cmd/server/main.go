@@ -6,6 +6,7 @@ import (
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/routes"
+	"halostory_go_backend/internal/services"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -16,6 +17,9 @@ func main() {
 
 	// Koneksi ke Database
 	database.Connect()
+
+	// Koneksi ke S3
+	services.InitS3()
 
 	// Inisialisasi instance Fiber baru
 	app := fiber.New()
