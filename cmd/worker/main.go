@@ -39,7 +39,7 @@ func main() {
 	}
 
 	server := asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: 10,
+		Concurrency: 30,
 		Queues: map[string]int{
 			"ai-chat": 10,
 			"default": 5,

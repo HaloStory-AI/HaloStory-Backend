@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"rafiq8k-moga/halostory-go-backend/internal/config"
 	"rafiq8k-moga/halostory-go-backend/internal/jobs"
@@ -18,10 +19,10 @@ import (
 )
 
 type AIHandler struct {
-	db      *gorm.DB
-	cfg     *config.Config
-	rdb     *redis.Client
-	client  *asynq.Client
+	db     *gorm.DB
+	cfg    *config.Config
+	rdb    *redis.Client
+	client *asynq.Client
 }
 
 func NewAIHandler(db *gorm.DB, cfg *config.Config, rdb *redis.Client) *AIHandler {
@@ -45,20 +46,20 @@ func NewAIHandler(db *gorm.DB, cfg *config.Config, rdb *redis.Client) *AIHandler
 // POST /ai/chat/system
 func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 	var req struct {
-		Messages        []ai.Message `json:"messages"`
-		BotID           string       `json:"bot_id"`
-		Language        *string      `json:"language"`
-		Temperature     *float64     `json:"temperature"`
-		ResponseLength  *int         `json:"response_length"`
-		MaxTokens       *int         `json:"max_tokens"`
-		TopP            *float64     `json:"top_p"`
-		HistoryDepth    *int         `json:"history_depth"`
-		ReasoningEnabled *bool       `json:"reasoning_enabled"`
-		Summary         *string      `json:"summary"`
-		IsGroup         *bool        `json:"is_group"`
-		IsDisableBond   *bool        `json:"isdisablebond"`
-		BotIDs          []string     `json:"bot_ids"`
-		UserPersona     *string      `json:"user_persona"`
+		Messages         []ai.Message `json:"messages"`
+		BotID            string       `json:"bot_id"`
+		Language         *string      `json:"language"`
+		Temperature      *float64     `json:"temperature"`
+		ResponseLength   *int         `json:"response_length"`
+		MaxTokens        *int         `json:"max_tokens"`
+		TopP             *float64     `json:"top_p"`
+		HistoryDepth     *int         `json:"history_depth"`
+		ReasoningEnabled *bool        `json:"reasoning_enabled"`
+		Summary          *string      `json:"summary"`
+		IsGroup          *bool        `json:"is_group"`
+		IsDisableBond    *bool        `json:"isdisablebond"`
+		BotIDs           []string     `json:"bot_ids"`
+		UserPersona      *string      `json:"user_persona"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -78,12 +79,12 @@ func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 	messagesJSON, _ := json.Marshal(req.Messages)
 
 	payload := map[string]interface{}{
-		"messages":    string(messagesJSON),
-		"status":      "queued",
-		"user_id":     userID,
-		"is_priority": isVip,
+		"messages":     string(messagesJSON),
+		"status":       "queued",
+		"user_id":      userID,
+		"is_priority":  isVip,
 		"is_summarize": false,
-		"bot_id":      req.BotID,
+		"bot_id":       req.BotID,
 	}
 
 	if req.Language != nil {
@@ -116,8 +117,7 @@ func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 
 	payloadBytes, _ := json.Marshal(payload)
 	chatKey := fmt.Sprintf("halostory:chat:%s", uid)
-	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 0)
-	h.rdb.Expire(c.Context(), chatKey, 600)
+	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute)
 
 	if h.client != nil {
 		task, err := jobs.NewSystemAIChatTask(uid, userID, req.BotID, req.IsGroup != nil && *req.IsGroup)
@@ -135,10 +135,10 @@ func (h *AIHandler) SystemChat(c *fiber.Ctx) error {
 // POST /ai/summarize
 func (h *AIHandler) Summarize(c *fiber.Ctx) error {
 	var req struct {
-		Messages        []ai.Message `json:"messages"`
-		BotID           *string      `json:"bot_id"`
-		Language        *string      `json:"language"`
-		ReasoningEnabled *bool       `json:"reasoning_enabled"`
+		Messages         []ai.Message `json:"messages"`
+		BotID            *string      `json:"bot_id"`
+		Language         *string      `json:"language"`
+		ReasoningEnabled *bool        `json:"reasoning_enabled"`
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -168,19 +168,18 @@ func (h *AIHandler) Summarize(c *fiber.Ctx) error {
 	}
 
 	payload := map[string]interface{}{
-		"status":             "queued",
-		"user_id":            userID,
-		"bot_id":             botID,
-		"is_priority":        isVip,
-		"is_summarize":       true,
+		"status":               "queued",
+		"user_id":              userID,
+		"bot_id":               botID,
+		"is_priority":          isVip,
+		"is_summarize":         true,
 		"summarization_prompt": summarizationPrompt,
-		"language":           language,
+		"language":             language,
 	}
 
 	payloadBytes, _ := json.Marshal(payload)
 	chatKey := fmt.Sprintf("halostory:chat:%s", uid)
-	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 0)
-	h.rdb.Expire(c.Context(), chatKey, 600)
+	h.rdb.Set(c.Context(), chatKey, string(payloadBytes), 10*time.Minute)
 
 	if h.client != nil {
 		task, err := jobs.NewSystemAIChatTask(uid, userID, botID, false)
