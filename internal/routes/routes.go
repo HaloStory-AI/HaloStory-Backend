@@ -2,8 +2,8 @@ package routes
 
 import (
 	"rafiq8k-moga/halostory-go-backend/internal/config"
-	byokHandler "rafiq8k-moga/halostory-go-backend/internal/handlers/byok"
 	"rafiq8k-moga/halostory-go-backend/internal/handlers"
+	byokHandler "rafiq8k-moga/halostory-go-backend/internal/handlers/byok"
 	"rafiq8k-moga/halostory-go-backend/internal/middleware"
 
 	"github.com/gofiber/fiber/v2"
@@ -25,30 +25,40 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 	api.Post("/forgot-password", auth.ForgotPassword)
 	api.Post("/reset-password", auth.ResetPassword)
 
-	// ── Static Auth ──
-	staticGroup := api.Group("", middleware.StaticTokenAuth(cfg))
-	staticGroup.Post("/login", auth.Login)
-	staticGroup.Get("/v1/get-call", handlers.GetCall(cfg))
+	// ── Static Auth (applied per-route, NOT via group — empty-prefix groups
+	//     leak middleware to sibling routes in Fiber v2) ──
+	api.Post("/login", middleware.StaticTokenAuth(cfg), auth.Login)
+	api.Get("/v1/get-call", middleware.StaticTokenAuth(cfg), handlers.GetCall(cfg))
 
 	// ── JWT Auth (allow banned users for device reporting) ──
-	jwtGroup := api.Group("", middleware.JWTAuth(cfg))
-	jwtGroup.Post("/user/report-banned-device", auth.ReportBannedDevice)
+	api.Post("/user/report-banned-device", middleware.JWTAuth(cfg), auth.ReportBannedDevice)
 
 	// ── JWT Auth + Banned Check ──
-	jwtBanned := api.Group("", middleware.JWTAuth(cfg), middleware.BannedCheck(db))
-	jwtBanned.Get("/user", auth.GetUser)
-	jwtBanned.Post("/email/verify/send", auth.SendVerificationOTP)
-	jwtBanned.Post("/email/verify", auth.VerifyEmail)
-	jwtBanned.Post("/user/update-email", auth.UpdateEmail)
-	jwtBanned.Post("/user/update-name", auth.UpdateName)
-	jwtBanned.Post("/user/update-password", auth.UpdatePassword)
-	jwtBanned.Post("/user/update-persona", auth.UpdatePersona)
+	// Use a closure to avoid empty-prefix group middleware leaking in Fiber v2
+	jwtBanned := func(handler fiber.Handler) fiber.Handler {
+		return func(c *fiber.Ctx) error {
+			if err := middleware.JWTAuth(cfg)(c); err != nil {
+				return err
+			}
+			if err := middleware.BannedCheck(db)(c); err != nil {
+				return err
+			}
+			return handler(c)
+		}
+	}
+	api.Get("/user", jwtBanned(auth.GetUser))
+	api.Post("/email/verify/send", jwtBanned(auth.SendVerificationOTP))
+	api.Post("/email/verify", jwtBanned(auth.VerifyEmail))
+	api.Post("/user/update-email", jwtBanned(auth.UpdateEmail))
+	api.Post("/user/update-name", jwtBanned(auth.UpdateName))
+	api.Post("/user/update-password", jwtBanned(auth.UpdatePassword))
+	api.Post("/user/update-persona", jwtBanned(auth.UpdatePersona))
 
 	// ── AI Chat ──
-	jwtBanned.Post("/ai/chat/system", ai.SystemChat)
-	jwtBanned.Post("/ai/summarize", ai.Summarize)
-	jwtBanned.Get("/chat/status/:uuid", ai.ChatStatus)
-	jwtBanned.Get("/ai/system-prompt/:bot_id", ai.GetSystemPrompt)
+	api.Post("/ai/chat/system", jwtBanned(ai.SystemChat))
+	api.Post("/ai/summarize", jwtBanned(ai.Summarize))
+	api.Get("/chat/status/:uuid", jwtBanned(ai.ChatStatus))
+	api.Get("/ai/system-prompt/:bot_id", jwtBanned(ai.GetSystemPrompt))
 
 	// ── BYOK — 16 individual routes + models ──
 	providers := []string{
@@ -57,53 +67,53 @@ func Register(app *fiber.App, cfg *config.Config, db *gorm.DB, rdb *redis.Client
 		"nanogpt", "venus", "zai", "novel", "horde", "openai-compatible",
 	}
 	for _, p := range providers {
-		jwtBanned.Post("/byok/"+p+"/chat", byok.BYOKChatHandler())
+		api.Post("/byok/"+p+"/chat", jwtBanned(byok.BYOKChatHandler()))
 	}
-	jwtBanned.Post("/byok/models", byokHandler.FetchModels)
+	api.Post("/byok/models", jwtBanned(byokHandler.FetchModels))
 
 	// ── Bot routes ──
 	bot := handlers.NewBotHandler(db)
 	bond := handlers.NewBondHandler(db, cfg)
-	jwtBanned.Get("/bots", bot.Index)
-	jwtBanned.Post("/bots/recruit", bond.Recruit)
-	jwtBanned.Get("/bots/bond/:bot_id", bond.Show)
-	jwtBanned.Post("/bots/bond/:bot_id/choice", bond.HandleChoice)
-	jwtBanned.Post("/bots/bond/:bot_id/debug", bond.DebugUpdate)
+	api.Get("/bots", jwtBanned(bot.Index))
+	api.Post("/bots/recruit", jwtBanned(bond.Recruit))
+	api.Get("/bots/bond/:bot_id", jwtBanned(bond.Show))
+	api.Post("/bots/bond/:bot_id/choice", jwtBanned(bond.HandleChoice))
+	api.Post("/bots/bond/:bot_id/debug", jwtBanned(bond.DebugUpdate))
 
 	// ── Story routes ──
 	story := handlers.NewStoryHandler(db)
-	jwtBanned.Get("/v1/stories", story.GetByBondedBots)
+	api.Get("/v1/stories", jwtBanned(story.GetByBondedBots))
 
 	// ── Calendar ──
 	cal := handlers.NewCalendarHandler(db)
-	jwtBanned.Post("/v1/calendar", cal.Index)
+	api.Post("/v1/calendar", jwtBanned(cal.Index))
 
 	// ── Categories ──
 	cat := handlers.NewCategoryHandler(db)
-	jwtBanned.Get("/v1/categories", cat.Index)
-	jwtBanned.Get("/v1/category/:slug", cat.Bots)
+	api.Get("/v1/categories", jwtBanned(cat.Index))
+	api.Get("/v1/category/:slug", jwtBanned(cat.Bots))
 
 	// ── Bot Tab ──
 	botTab := handlers.NewBotTabHandler(db)
-	jwtBanned.Get("/v1/bot-tab", botTab.Index)
+	api.Get("/v1/bot-tab", jwtBanned(botTab.Index))
 
 	// ── Bot Bio ──
 	botBio := handlers.NewBotBioHandler(db)
-	jwtBanned.Get("/v1/bot-bio/:bot_id", botBio.Show)
+	api.Get("/v1/bot-bio/:bot_id", jwtBanned(botBio.Show))
 
 	// ── Recruited Bots ──
 	recruited := handlers.NewRecruitedBotHandler(db)
-	jwtBanned.Get("/v1/recruited-bots", recruited.Index)
+	api.Get("/v1/recruited-bots", jwtBanned(recruited.Index))
 
 	// ── Student Requests ──
 	sr := handlers.NewStudentRequestHandler(db, cfg)
-	jwtBanned.Get("/student-requests", sr.Index)
-	jwtBanned.Post("/student-requests", sr.Store)
+	api.Get("/student-requests", jwtBanned(sr.Index))
+	api.Post("/student-requests", jwtBanned(sr.Store))
 
 	// ── Backup ──
 	backup := handlers.NewBackupHandler(db)
-	jwtBanned.Post("/user/backup", backup.Store)
-	jwtBanned.Get("/user/restore", backup.Restore)
+	api.Post("/user/backup", jwtBanned(backup.Store))
+	api.Get("/user/restore", jwtBanned(backup.Restore))
 
 	// ── Admin (JWT + role=admin) ──
 	admin := handlers.NewAdminHandler(db, cfg)

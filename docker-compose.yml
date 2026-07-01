@@ -1,10 +1,44 @@
 services:
+  mysql-tunnel:
+    image: alpine:3.19
+    container_name: hsai-mysql-tunnel
+    ports:
+      - "3307:3306"
+    environment:
+      - SSH_TUNNEL_HOST=${SSH_TUNNEL_HOST:-163.61.58.197}
+      - SSH_TUNNEL_USER=${SSH_TUNNEL_USER:-root}
+      - SSH_TUNNEL_PASSWORD=${SSH_TUNNEL_PASSWORD}
+      - REMOTE_MYSQL_HOST=${REMOTE_MYSQL_HOST:-127.0.0.1}
+      - REMOTE_MYSQL_PORT=${REMOTE_MYSQL_PORT:-3306}
+    command: >
+      sh -c "
+        apk add --no-cache autossh sshpass &&
+        sshpass -p '$${SSH_TUNNEL_PASSWORD}' autossh -M 0
+          -o StrictHostKeyChecking=no
+          -o ServerAliveInterval=30
+          -o ServerAliveCountMax=3
+          -o ExitOnForwardFailure=yes
+          -L 0.0.0.0:3306:$${REMOTE_MYSQL_HOST}:$${REMOTE_MYSQL_PORT}
+          -N $${SSH_TUNNEL_USER}@$${SSH_TUNNEL_HOST}
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "ss -tln | grep -q ':3306'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6389:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   app:
@@ -13,30 +47,33 @@ services:
       target: server
     ports:
       - "18000:18000"
-    env_file:
-      - .env
     depends_on:
-      - redis
+      mysql-tunnel:
+        condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
     build:
       context: .
       target: worker
-    env_file:
-      - .env
     depends_on:
-      - redis
+      mysql-tunnel:
+        condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   scheduler:
     build:
       context: .
       target: scheduler
-    env_file:
-      - .env
     depends_on:
-      - redis
+      mysql-tunnel:
+        condition: service_started
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
