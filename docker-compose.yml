@@ -48,6 +48,8 @@ services:
       target: server
     ports:
       - "18000:18000"
+    env_file:
+      - .env
     depends_on:
       mysql-tunnel:
         condition: service_started
@@ -59,6 +61,8 @@ services:
     build:
       context: .
       target: worker
+    env_file:
+      - .env
     depends_on:
       mysql-tunnel:
         condition: service_started
@@ -70,6 +74,8 @@ services:
     build:
       context: .
       target: scheduler
+    env_file:
+      - .env
     depends_on:
       mysql-tunnel:
         condition: service_started
