@@ -9,7 +9,9 @@ import (
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/utils"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -43,59 +45,67 @@ type VerifyOtpRequest struct {
 }
 
 // SendVerificationOtp untuk diakses via endpoint (minta ulang OTP)
-func SendVerificationOtp(c *fiber.Ctx) error {
-	user := c.Locals("user").(models.User)
+func SendVerificationOtp(c *gin.Context) {
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 
 	if user.EmailVerifiedAt != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Email already verified.",
 		})
+		return
 	}
 
 	SendOtp(user.Email)
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"message": "Verification OTP sent to your email.",
 	})
 }
 
 // VerifyEmail untuk memvalidasi OTP yang dimasukkan
-func VerifyEmail(c *fiber.Ctx) error {
+func VerifyEmail(c *gin.Context) {
 	var req VerifyOtpRequest
-	if err := c.BodyParser(&req); err != nil || len(req.Otp) != 6 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+	if err := c.ShouldBind(&req); err != nil || len(req.Otp) != 6 {
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Input tidak valid. OTP harus 6 digit.",
 		})
+		return
 	}
 
-	user := c.Locals("user").(models.User)
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 
 	if user.EmailVerifiedAt != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Email already verified.",
 		})
+		return
 	}
 
 	var otpRecord models.EmailVerificationOtp
 	if err := database.DB.Where("email = ?", user.Email).First(&otpRecord).Error; err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Invalid or expired OTP.",
 		})
+		return
 	}
 
 	// Cek apakah lebih dari 15 menit
 	if otpRecord.CreatedAt != nil && time.Since(*otpRecord.CreatedAt) > 15*time.Minute {
 		database.DB.Where("email = ?", user.Email).Delete(&models.EmailVerificationOtp{})
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "OTP has expired. Please request a new one.",
 		})
+		return
 	}
 
 	// Cek hash
 	if err := bcrypt.CompareHashAndPassword([]byte(otpRecord.Otp), []byte(req.Otp)); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Invalid OTP.",
 		})
+		return
 	}
 
 	// Sukses, update user
@@ -106,7 +116,7 @@ func VerifyEmail(c *fiber.Ctx) error {
 	// Hapus OTP dari tabel
 	database.DB.Where("email = ?", user.Email).Delete(&models.EmailVerificationOtp{})
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"message": "Email verified successfully.",
 		"user":    user,
 	})

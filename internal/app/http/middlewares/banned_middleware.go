@@ -5,20 +5,23 @@ import (
 
 	"halostory_go_backend/internal/app/models"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // CheckBanned adalah middleware untuk memastikan user belum di-banned.
 // Middleware ini HARUS diletakkan setelah middleware Protected() (JWT).
-func CheckBanned() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+func CheckBanned() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		// Ambil user dari context (diset oleh Protected() JWT Middleware)
-		userVal := c.Locals("user")
-		if userVal == nil {
+		userVal, exists := c.Get("user")
+		if !exists || userVal == nil {
 			// Jika tidak ada user (mungkin lupa pasang JWT), langsung tolak
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"message": "User belum terautentikasi.",
 			})
+			return
 		}
 
 		user := userVal.(models.User)
@@ -32,14 +35,15 @@ func CheckBanned() fiber.Handler {
 			}
 
 			// Return JSON 403 persis seperti format Laravel
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"message":      "Akun Anda telah dibanned.",
 				"reason":       user.BanReason,
 				"banned_until": bannedUntilStr,
 			})
+			return
 		}
 
 		// Lanjut ke controller berikutnya
-		return c.Next()
+		c.Next()
 	}
 }

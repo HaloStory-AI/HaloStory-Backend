@@ -6,20 +6,24 @@ import (
 	"halostory_go_backend/internal/database"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 type RecruitRequest struct {
 	BotID string `json:"bot_id" form:"bot_id"`
 }
 
-func BondRecruit(c *fiber.Ctx) error {
+func BondRecruit(c *gin.Context) {
 	var req RecruitRequest
-	if err := c.BodyParser(&req); err != nil || req.BotID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bot_id is required"})
+	if err := c.ShouldBind(&req); err != nil || req.BotID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bot_id is required"})
+		return
 	}
 
-	user := c.Locals("user").(models.User)
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 
 	var bond models.UserBotBond
 	err := database.DB.Where("user_id = ? AND bot_id = ?", user.ID, req.BotID).First(&bond).Error
@@ -37,7 +41,7 @@ func BondRecruit(c *fiber.Ctx) error {
 	// Preload bot for RelationshipLabel
 	database.DB.Preload("Bot").First(&bond, bond.ID)
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"bot_id":             req.BotID,
 		"xp":                 bond.Xp,
@@ -47,9 +51,10 @@ func BondRecruit(c *fiber.Ctx) error {
 	})
 }
 
-func BondShow(c *fiber.Ctx) error {
-	botID := c.Params("bot_id")
-	user := c.Locals("user").(models.User)
+func BondShow(c *gin.Context) {
+	botID := c.Param("bot_id")
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 
 	var bond models.UserBotBond
 	err := database.DB.Where("user_id = ? AND bot_id = ?", user.ID, botID).First(&bond).Error
@@ -81,7 +86,7 @@ func BondShow(c *fiber.Ctx) error {
 		progressPercent = 100
 	}
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"bot_id":             botID,
 		"xp":                 bond.Xp,
@@ -99,28 +104,32 @@ type ChoiceRequest struct {
 	Choice string `json:"choice" form:"choice"`
 }
 
-func BondHandleChoice(c *fiber.Ctx) error {
-	botID := c.Params("bot_id")
+func BondHandleChoice(c *gin.Context) {
+	botID := c.Param("bot_id")
 
 	var req ChoiceRequest
-	if err := c.BodyParser(&req); err != nil || req.Choice == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"success": false, "message": "choice is required"})
+	if err := c.ShouldBind(&req); err != nil || req.Choice == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "choice is required"})
+		return
 	}
 
 	var bot models.Bot
 	database.DB.Where("bot_id = ?", botID).First(&bot)
 
 	if bot.Child && req.Choice != "beloved" && req.Choice != "reject_love" {
-		return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"success": false,
 			"message": "Invalid choice for child character.",
 		})
+		return
 	}
 
-	user := c.Locals("user").(models.User)
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 	var bond models.UserBotBond
 	if err := database.DB.Where("user_id = ? AND bot_id = ?", user.ID, botID).First(&bond).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"success": false, "message": "Bond not found"})
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Bond not found"})
+		return
 	}
 
 	bond.ApplyChoice(req.Choice)
@@ -128,7 +137,7 @@ func BondHandleChoice(c *fiber.Ctx) error {
 
 	database.DB.Preload("Bot").First(&bond, bond.ID)
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"bond_status":        bond.BondStatus,
 		"relationship_label": bond.GetRelationshipLabel(bond.Bot),
@@ -142,14 +151,16 @@ type DebugRequest struct {
 	Reset  *bool   `json:"reset" form:"reset"`
 }
 
-func BondDebugUpdate(c *fiber.Ctx) error {
+func BondDebugUpdate(c *gin.Context) {
 	appDebug := config.Env("APP_DEBUG", "false")
 	if appDebug != "true" {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Forbidden"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
+		return
 	}
 
-	botID := c.Params("bot_id")
-	user := c.Locals("user").(models.User)
+	botID := c.Param("bot_id")
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
 
 	var bond models.UserBotBond
 	err := database.DB.Where("user_id = ? AND bot_id = ?", user.ID, botID).First(&bond).Error
@@ -164,7 +175,7 @@ func BondDebugUpdate(c *fiber.Ctx) error {
 	}
 
 	var req DebugRequest
-	c.BodyParser(&req)
+	c.ShouldBind(&req)
 
 	// Fallback to query params if not JSON body
 	if req.Xp == nil && c.Query("xp") != "" {
@@ -205,7 +216,7 @@ func BondDebugUpdate(c *fiber.Ctx) error {
 	database.DB.Save(&bond)
 	database.DB.Preload("Bot").First(&bond, bond.ID)
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"xp":                 bond.Xp,
 		"bond_hearts":        bond.GetLevel(),

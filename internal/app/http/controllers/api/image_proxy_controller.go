@@ -4,21 +4,25 @@ import (
 	"context"
 	"halostory_go_backend/internal/services"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 	"github.com/minio/minio-go/v7"
 )
 
-func ImageProxy(c *fiber.Ctx) error {
+func ImageProxy(c *gin.Context) {
 	path := c.Query("path")
 	if path == "" {
-		return c.Status(fiber.StatusNotFound).SendString("Not Found")
+		c.String(http.StatusNotFound, "Not Found")
+		return
 	}
 
 	client := services.MinioClient
 	bucket := services.S3Bucket
 
 	if client == nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("S3 Client not configured")
+		c.String(http.StatusInternalServerError, "S3 Client not configured")
+		return
 	}
 
 	ctx := context.Background()
@@ -26,13 +30,15 @@ func ImageProxy(c *fiber.Ctx) error {
 	// Dapatkan meta data untuk Content-Type
 	stat, err := client.StatObject(ctx, bucket, path, minio.StatObjectOptions{})
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).SendString("Not Found")
+		c.String(http.StatusNotFound, "Not Found")
+		return
 	}
 
 	// Buka stream object
 	obj, err := client.GetObject(ctx, bucket, path, minio.GetObjectOptions{})
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).SendString("Not Found")
+		c.String(http.StatusNotFound, "Not Found")
+		return
 	}
 
 	// Atur Header
@@ -41,10 +47,8 @@ func ImageProxy(c *fiber.Ctx) error {
 		contentType = "application/octet-stream"
 	}
 
-	c.Set("Content-Type", contentType)
-	c.Set("Cache-Control", "public, max-age=86400")
-
-	// Pass-through stream dari MinIO (S3) langsung ke client HTTP Fiber
-	// obj mengimplementasikan io.Reader
-	return c.SendStream(obj)
+	// DataFromReader mengirim Content-Length, Content-Type, dan extra headers.
+	c.DataFromReader(http.StatusOK, stat.Size, contentType, obj, map[string]string{
+		"Cache-Control": "public, max-age=86400",
+	})
 }

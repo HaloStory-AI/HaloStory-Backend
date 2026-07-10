@@ -10,18 +10,37 @@ import (
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
+type botIndexItem struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Description  *string `json:"description"`
+	Avatar       *string `json:"avatar"`
+	ImageURL     string  `json:"image_url"`
+	Background   *string `json:"background"`
+	Personality  *string `json:"personality"`
+	ChatExamples *string `json:"chat_examples"`
+	Birthday     *string `json:"birthday"`
+	BondXp       int     `json:"bond_xp"`
+	BondHearts   int     `json:"bond_hearts"`
+	Sbr          string  `json:"sbr"`
+	Color        string  `json:"color"`
+	Child        bool    `json:"child"`
+}
+
 // Index menampilkan seluruh bot
-func BotIndex(c *fiber.Ctx) error {
+func BotIndex(c *gin.Context) {
 	var bots []models.Bot
 	database.DB.Select("bot_id, name, description, avatar, jailbreak, personality, chat_examples, birthday, sbr, color, child").Find(&bots)
 
 	var bonds []models.UserBotBond
 	// Ambil dari context jika ada
-	userVal := c.Locals("user")
-	if userVal != nil {
+	userVal, exists := c.Get("user")
+	if exists && userVal != nil {
 		user := userVal.(models.User)
 		database.DB.Where("user_id = ?", user.ID).Find(&bonds)
 	}
@@ -33,7 +52,7 @@ func BotIndex(c *fiber.Ctx) error {
 
 	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 
-	var response []fiber.Map
+	var response []botIndexItem
 	for _, bot := range bots {
 		bondXp := 0
 		bondHearts := 0
@@ -76,42 +95,43 @@ func BotIndex(c *fiber.Ctx) error {
 			birthdayStr = &str
 		}
 
-		response = append(response, fiber.Map{
-			"id":            bot.BotID,
-			"name":          bot.Name,
-			"description":   bot.Description,
-			"avatar":        bot.Avatar,
-			"image_url":     fmt.Sprintf("%s/api/image?path=Bot/%s/%s", appUrl, bot.BotID, avatar),
-			"background":    bot.Jailbreak,
-			"personality":   bot.Personality,
-			"chat_examples": bot.ChatExamples,
-			"birthday":      birthdayStr,
-			"bond_xp":       bondXp,
-			"bond_hearts":   bondHearts,
-			"sbr":           sbr,
-			"color":         color,
-			"child":         bot.Child,
+		response = append(response, botIndexItem{
+			ID:           bot.BotID,
+			Name:         bot.Name,
+			Description:  bot.Description,
+			Avatar:       bot.Avatar,
+			ImageURL:     fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			Background:   bot.Jailbreak,
+			Personality:  bot.Personality,
+			ChatExamples: bot.ChatExamples,
+			Birthday:     birthdayStr,
+			BondXp:       bondXp,
+			BondHearts:   bondHearts,
+			Sbr:          sbr,
+			Color:        color,
+			Child:        bot.Child,
 		})
 	}
 
 	// Tangani kasus slice nil menjadi empty array []
 	if response == nil {
-		response = make([]fiber.Map, 0)
+		response = make([]botIndexItem, 0)
 	}
 
-	return c.JSON(response)
+	c.JSON(http.StatusOK, response)
 }
 
 // ShowBio mengekstrak profil dari personality string via RegEx
-func ShowBio(c *fiber.Ctx) error {
-	botID := c.Params("bot_id")
+func ShowBio(c *gin.Context) {
+	botID := c.Param("bot_id")
 	var bot models.Bot
 
 	if err := database.DB.Where("bot_id = ?", botID).First(&bot).Error; err != nil {
-		return c.JSON(fiber.Map{
+		c.JSON(http.StatusOK, gin.H{
 			"description": "",
 			"personality": nil,
 		})
+		return
 	}
 
 	desc := ""
@@ -126,7 +146,7 @@ func ShowBio(c *fiber.Ctx) error {
 
 	parsedPers := parsePersonality(pers)
 
-	return c.JSON(fiber.Map{
+	c.JSON(http.StatusOK, gin.H{
 		"description": desc,
 		"personality": parsedPers,
 	})
@@ -162,9 +182,7 @@ func parsePersonality(raw *string) map[string]string {
 		if len(matches) > 1 {
 			val := strings.TrimSpace(matches[1])
 			val = strings.Trim(val, `"'*`)
-			if strings.HasSuffix(val, ",") {
-				val = strings.TrimSuffix(val, ",")
-			}
+			val = strings.TrimSuffix(val, ",")
 			val = strings.TrimSpace(val)
 			if val != "" {
 				result[key] = val

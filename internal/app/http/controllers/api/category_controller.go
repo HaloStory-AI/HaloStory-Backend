@@ -8,18 +8,40 @@ import (
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 
-	"github.com/gofiber/fiber/v2"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
-func CategoryIndex(c *fiber.Ctx) error {
+type categoryIndexResponse struct {
+	Pinned   []gin.H `json:"pinned"`
+	Featured []gin.H `json:"featured"`
+	Default  []gin.H `json:"default"`
+}
+
+type botItemResponse struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+	Avatar      *string `json:"avatar"`
+	ImageURL    string  `json:"image_url"`
+	Birthday    *string `json:"birthday"`
+	BondXp      int     `json:"bond_xp"`
+	BondHearts  int     `json:"bond_hearts"`
+	Sbr         string  `json:"sbr"`
+	Color       string  `json:"color"`
+	Child       bool    `json:"child"`
+}
+
+func CategoryIndex(c *gin.Context) {
 	var categories []models.Category
 	database.DB.Order("name asc").Find(&categories)
 
 	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 
-	pinned := make([]fiber.Map, 0)
-	featured := make([]fiber.Map, 0)
-	defaultCat := make([]fiber.Map, 0)
+	pinned := make([]gin.H, 0)
+	featured := make([]gin.H, 0)
+	defaultCat := make([]gin.H, 0)
 
 	for _, cat := range categories {
 		logoUrl := ""
@@ -27,11 +49,11 @@ func CategoryIndex(c *fiber.Ctx) error {
 			logoUrl = *cat.LogoUrl
 		}
 
-		item := fiber.Map{
+		item := gin.H{
 			"id":       cat.ID,
 			"name":     cat.Name,
 			"slug":     cat.Slug,
-			"logo_url": fmt.Sprintf("%s/api/image?path=Category/%s", appUrl, logoUrl),
+			"logo_url": fmt.Sprintf("%s/api/image?path=%s", appUrl, logoUrl),
 		}
 
 		if cat.Pinned {
@@ -43,21 +65,19 @@ func CategoryIndex(c *fiber.Ctx) error {
 		}
 	}
 
-	return c.JSON(fiber.Map{
-		"pinned":   pinned,
-		"featured": featured,
-		"default":  defaultCat,
+	c.JSON(http.StatusOK, categoryIndexResponse{
+		Pinned:   pinned,
+		Featured: featured,
+		Default:  defaultCat,
 	})
 }
 
-func CategoryBots(c *fiber.Ctx) error {
-	slug := c.Params("slug")
-	
-	// Kita asumsikan ini di bawah JWT protected route, jadi local "user" ada.
-	// Jika tidak, kita bisa abaikan logika ini dan beri bond_hearts 0.
-	userVal := c.Locals("user")
+func CategoryBots(c *gin.Context) {
+	slug := c.Param("slug")
+
+	userVal, exists := c.Get("user")
 	var bonds []models.UserBotBond
-	if userVal != nil {
+	if exists && userVal != nil {
 		user := userVal.(models.User)
 		database.DB.Where("user_id = ?", user.ID).Find(&bonds)
 	}
@@ -72,7 +92,7 @@ func CategoryBots(c *fiber.Ctx) error {
 
 	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 
-	var response []fiber.Map
+	var response []botItemResponse
 	for _, bot := range bots {
 		bondXp := 0
 		bondHearts := 0
@@ -110,28 +130,28 @@ func CategoryBots(c *fiber.Ctx) error {
 
 		var birthdayStr *string
 		if bot.Birthday != nil {
-			str := bot.Birthday.Format("2006-01-02")
+			str := bot.Birthday.Format("2007-01-02")
 			birthdayStr = &str
 		}
 
-		response = append(response, fiber.Map{
-			"id":          bot.BotID,
-			"name":        bot.Name,
-			"description": bot.Description,
-			"avatar":      bot.Avatar,
-			"image_url":   fmt.Sprintf("%s/api/image?path=Bot/%s/%s", appUrl, bot.BotID, avatar),
-			"birthday":    birthdayStr,
-			"bond_xp":     bondXp,
-			"bond_hearts": bondHearts,
-			"sbr":         sbr,
-			"color":       color,
-			"child":       bot.Child,
+		response = append(response, botItemResponse{
+			ID:          bot.BotID,
+			Name:        bot.Name,
+			Description: bot.Description,
+			Avatar:      bot.Avatar,
+			ImageURL:    fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			Birthday:    birthdayStr,
+			BondXp:      bondXp,
+			BondHearts:  bondHearts,
+			Sbr:         sbr,
+			Color:       color,
+			Child:       bot.Child,
 		})
 	}
 
 	if response == nil {
-		response = make([]fiber.Map, 0)
+		response = make([]botItemResponse, 0)
 	}
 
-	return c.JSON(response)
+	c.JSON(http.StatusOK, response)
 }

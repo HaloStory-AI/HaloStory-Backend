@@ -8,7 +8,7 @@ import (
 	"halostory_go_backend/internal/routes"
 	"halostory_go_backend/internal/services"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
@@ -21,17 +21,17 @@ func main() {
 	// Koneksi ke S3
 	services.InitS3()
 
-	// Inisialisasi instance Fiber baru
-	app := fiber.New()
+	// Inisialisasi instance Gin baru
+	r := gin.Default()
 
 	// Daftarkan routing (mirip seperti register di Laravel)
-	routes.SetupAPI(app)
+	routes.SetupAPI(r)
 
 	// Route dasar untuk memastikan server berjalan
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Halo dari Fiber v2! Routing terpisah berhasil.")
+	r.GET("/", func(c *gin.Context) {
+		c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
 	})
 
 	// Jalankan server di port 3000
-	log.Fatal(app.Listen(":3000"))
+	log.Fatal(r.Run(":3000"))
 }
