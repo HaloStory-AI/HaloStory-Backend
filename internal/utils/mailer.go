@@ -19,6 +19,18 @@ type OtpEmailData struct {
 }
 
 func SendOtpEmail(to, otp string) error {
+	return sendEmail(to, otp, "Email Verification",
+		"Terima kasih telah bergabung dengan HaloStory AI! Untuk menyelesaikan pendaftaran dan mengamankan akun Anda, silakan verifikasi email Anda menggunakan kode berikut:",
+		"Email Verification OTP")
+}
+
+func SendPasswordResetOtpEmail(to, otp string) error {
+	return sendEmail(to, otp, "Password Reset",
+		"Kami menerima permintaan reset password untuk akun HaloStory AI Anda. Gunakan kode OTP berikut untuk melanjutkan proses reset password:",
+		"Password Reset OTP")
+}
+
+func sendEmail(to, otp, title, bodyText, subject string) error {
 	host := config.Env("MAIL_HOST", "127.0.0.1")
 	portStr := config.Env("MAIL_PORT", "2525")
 	user := config.Env("MAIL_USERNAME", "")
@@ -29,15 +41,13 @@ func SendOtpEmail(to, otp string) error {
 
 	port, _ := strconv.Atoi(portStr)
 
-	// Siapkan data untuk template
 	data := OtpEmailData{
-		Title:   "Email Verification OTP",
-		Body:    "Terima kasih telah bergabung dengan HaloStory AI! Untuk menyelesaikan pendaftaran dan mengamankan akun Anda, silakan verifikasi email Anda menggunakan kode berikut:",
+		Title:   title,
+		Body:    bodyText,
 		Otp:     otp,
 		AppName: appName,
 	}
 
-	// Parse template HTML dari file
 	t, err := template.ParseFiles("internal/templates/otp.html")
 	if err != nil {
 		log.Println("Gagal membaca template otp.html:", err)
@@ -52,7 +62,7 @@ func SendOtpEmail(to, otp string) error {
 	m := gomail.NewMessage()
 	m.SetHeader("From", m.FormatAddress(from, fromName))
 	m.SetHeader("To", to)
-	m.SetHeader("Subject", appName+" - Email Verification OTP")
+	m.SetHeader("Subject", appName+" - "+subject)
 	m.SetBody("text/html", body.String())
 
 	d := gomail.NewDialer(host, port, user, pass)

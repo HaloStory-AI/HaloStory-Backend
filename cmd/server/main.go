@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"halostory_go_backend/internal/app/http/middlewares"
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/routes"
@@ -21,8 +22,14 @@ func main() {
 	// Koneksi ke S3
 	services.InitS3()
 
-	// Inisialisasi instance Gin baru
-	r := gin.Default()
+	// Koneksi ke Redis
+	services.InitRedis()
+
+	// Inisialisasi instance Gin baru dengan middleware global
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	r.Use(middlewares.SetupCORS())
 
 	// Daftarkan routing (mirip seperti register di Laravel)
 	routes.SetupAPI(r)

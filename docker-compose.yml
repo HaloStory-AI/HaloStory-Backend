@@ -1,0 +1,37 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-halostory}
+      DB_USERNAME: ${DB_USERNAME:-halostory}
+      DB_PASSWORD: ${DB_PASSWORD:-change_me}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      redis:
+        condition: service_started
+    ports:
+      - "${APP_HOST_PORT:-3000}:3000"
+
+  redis:
+    image: redis:7-alpine
+    container_name: halostory-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  redis_data:

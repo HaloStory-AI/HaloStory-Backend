@@ -26,9 +26,19 @@ func SetupAPI(r *gin.Engine) {
 	// Public API routes
 	api.GET("/image", apiControllers.ImageProxy)
 
+	// App Status (Public)
+	api.GET("/app/status", apiControllers.AppStatus)
+
 	// Authentication routes (Public)
 	api.POST("/login", auth.Login)
 	api.POST("/register", auth.Register)
+
+	// Password Reset Routes (Public)
+	api.POST("/forgot-password", auth.ForgotPassword)
+	api.POST("/reset-password", auth.ResetPassword)
+
+	// Protected routes tanpa banned middleware (biar banned user bisa report device)
+	api.POST("/user/report-banned-device", middlewares.Protected(), auth.ReportBannedDevice)
 
 	// Protected routes (membutuhkan JWT dan tidak dibanned)
 	protected := api.Group("/", middlewares.Protected(), middlewares.CheckBanned())
@@ -59,4 +69,38 @@ func SetupAPI(r *gin.Engine) {
 	protected.GET("/bots/bond/:bot_id", apiControllers.BondShow)
 	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
 	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
+
+	// Calendar Routes
+	protected.POST("/v1/calendar", apiControllers.CalendarIndex)
+
+	// Student Request Routes
+	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
+	protected.POST("/student-requests", apiControllers.StudentRequestStore)
+
+	// Backup Routes
+	protected.POST("/user/backup", apiControllers.BackupStore)
+	protected.GET("/user/restore", apiControllers.BackupRestore)
+
+	// User Profile Routes
+	protected.POST("/user/update-email", auth.UpdateEmail)
+	protected.POST("/user/update-name", auth.UpdateName)
+	protected.POST("/user/update-password", auth.UpdatePassword)
+	protected.POST("/user/update-persona", auth.UpdatePersona)
+
+	// ─── Admin Panel ───
+	admin := protected.Group("/admin", middlewares.CheckAdmin())
+	{
+		admin.GET("/users", apiControllers.AdminGetUsers)
+		admin.PUT("/users/:id/role", apiControllers.AdminChangeUserRole)
+		admin.DELETE("/users/:id", apiControllers.AdminDeleteUser)
+
+		admin.GET("/bots", apiControllers.AdminGetBots)
+		admin.POST("/bots", apiControllers.AdminStoreBot)
+		admin.POST("/bots/import", apiControllers.AdminImportBots)
+		admin.PUT("/bots/:id", apiControllers.AdminUpdateBot)
+		admin.DELETE("/bots/:id", apiControllers.AdminDeleteBot)
+
+		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
+		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)
+	}
 }
