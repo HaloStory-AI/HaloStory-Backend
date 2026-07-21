@@ -223,9 +223,11 @@ func UpdateName(c *gin.Context) {
 
 func UpdatePassword(c *gin.Context) {
 	var req struct {
-		CurrentPassword    string `json:"current_password" form:"current_password"`
-		Password           string `json:"password" form:"password"`
-		PasswordConfirm    string `json:"password_confirmation" form:"password_confirmation"`
+		CurrentPassword    string `json:"current_password"`
+		NewPassword        string `json:"new_password"`
+		Password           string `json:"password"`
+		NewPasswordConfirm string `json:"new_password_confirmation"`
+		PasswordConfirm    string `json:"password_confirmation"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -234,21 +236,30 @@ func UpdatePassword(c *gin.Context) {
 		return
 	}
 
-	if req.CurrentPassword == "" || req.Password == "" {
+	password := req.NewPassword
+	if password == "" {
+		password = req.Password
+	}
+	confirm := req.NewPasswordConfirm
+	if confirm == "" {
+		confirm = req.PasswordConfirm
+	}
+
+	if req.CurrentPassword == "" || password == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message": "Current password dan password baru wajib diisi.",
 		})
 		return
 	}
 
-	if len(req.Password) < 8 {
+	if len(password) < 8 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message": "Password minimal 8 karakter.",
 		})
 		return
 	}
 
-	if req.Password != req.PasswordConfirm {
+	if password != confirm {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Password confirmation tidak cocok.",
 		})
@@ -265,7 +276,7 @@ func UpdatePassword(c *gin.Context) {
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Gagal mengenkripsi password.",
