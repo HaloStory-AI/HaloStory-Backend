@@ -8,6 +8,7 @@ import (
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -121,6 +122,8 @@ func StudentRequestStore(c *gin.Context) {
 	now := time.Now()
 	studentRequest.CreatedAt = now
 	studentRequest.UpdatedAt = now
+
+	go services.SendStudentRequest(user.Name, input.StudentName)
 
 	c.JSON(http.StatusOK, studentRequestStoreResponse{
 		Success: true,

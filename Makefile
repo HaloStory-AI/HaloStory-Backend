@@ -1,10 +1,20 @@
-.PHONY: dev build test clean docker-up docker-down docker-build
+.PHONY: dev build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs
 
 dev:
 	air
 
-build:
-	go build -o ./tmp/main ./cmd/server
+build-server:
+	go build -o ./tmp/server ./cmd/server
+
+build-worker:
+	go build -o ./tmp/worker ./cmd/worker
+
+build-scheduler:
+	go build -o ./tmp/scheduler ./cmd/scheduler
+
+build-all: build-server build-worker build-scheduler
+
+build: build-all
 
 test:
 	go test -v -count=1 ./...

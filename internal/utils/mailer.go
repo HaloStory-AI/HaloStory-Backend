@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"halostory_go_backend/internal/config"
+	"halostory_go_backend/internal/templates"
 
 	"gopkg.in/gomail.v2"
 )
@@ -48,9 +49,9 @@ func sendEmail(to, otp, title, bodyText, subject string) error {
 		AppName: appName,
 	}
 
-	t, err := template.ParseFiles("internal/templates/otp.html")
+	t, err := template.New("otp").Parse(templates.OTPTemplateContent)
 	if err != nil {
-		log.Println("Gagal membaca template otp.html:", err)
+		log.Println("Gagal parsing template otp.html:", err)
 		return err
 	}
 

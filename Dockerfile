@@ -11,6 +11,8 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/worker ./cmd/worker
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/scheduler ./cmd/scheduler
 
 # Stage 2: Runtime
 FROM alpine:3.20
@@ -20,6 +22,8 @@ RUN apk add --no-cache ca-certificates tzdata curl
 WORKDIR /app
 
 COPY --from=builder /app/server .
+COPY --from=builder /app/worker .
+COPY --from=builder /app/scheduler .
 
 EXPOSE 3000
 

@@ -10,6 +10,7 @@ import (
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -565,12 +566,28 @@ func AdminUpdateStudentRequestStatus(c *gin.Context) {
 		return
 	}
 
-	result := database.DB.Model(&models.StudentRequest{}).Where("id = ?", requestID).Update("status", req.Status)
-	if result.RowsAffected == 0 {
+	var reqRecord models.StudentRequest
+	if err := database.DB.Where("id = ?", requestID).First(&reqRecord).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"message": "Student request tidak ditemukan.",
 		})
 		return
+	}
+
+	oldStatus := reqRecord.Status
+
+	database.DB.Model(&reqRecord).Update("status", req.Status)
+
+	if oldStatus == "pending" && req.Status == "approved" {
+		var user models.User
+		if err := database.DB.First(&user, reqRecord.UserID).Error; err == nil {
+			go services.SendRequestApproved(user.Name, reqRecord.StudentName)
+		}
+	} else if oldStatus == "pending" && req.Status == "rejected" {
+		var user models.User
+		if err := database.DB.First(&user, reqRecord.UserID).Error; err == nil {
+			go services.SendRequestRejected(user.Name, reqRecord.StudentName)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

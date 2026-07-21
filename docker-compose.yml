@@ -24,6 +24,53 @@ services:
         condition: service_started
     ports:
       - "${APP_HOST_PORT:-3000}:3000"
+    networks:
+      - default
+      - dokploy-network
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: ["./worker"]
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - default
+      - dokploy-network
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: ["./scheduler"]
+    depends_on:
+      redis:
+        condition: service_started
+    networks:
+      - default
+      - dokploy-network
 
   redis:
     image: redis:7-alpine
@@ -32,6 +79,13 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    networks:
+      - default
+      - dokploy-network
 
 volumes:
   redis_data:
+
+networks:
+  dokploy-network:
+    external: true

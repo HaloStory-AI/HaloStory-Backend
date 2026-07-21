@@ -163,6 +163,18 @@ func (b *UserBotBond) HasPendingChoice() bool {
 	return false
 }
 
+func (b *UserBotBond) CanReconcile() bool {
+	return b.BondStatus == "enemy"
+}
+
+func (b *UserBotBond) ApplyReconcile() {
+	b.BondStatus = "normal"
+}
+
+func (b *UserBotBond) CanGainXp() bool {
+	return b.BondStatus != "enemy" && b.BondStatus != "rejected" && b.BondStatus != "stuck"
+}
+
 func (b *UserBotBond) ApplyChoice(choice string) {
 	level := b.GetLevel()
 	

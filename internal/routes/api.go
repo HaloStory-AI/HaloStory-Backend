@@ -3,6 +3,7 @@ package routes
 import (
 	"halostory_go_backend/internal/app/http/controllers/auth"
 	apiControllers "halostory_go_backend/internal/app/http/controllers/api"
+	byokControllers "halostory_go_backend/internal/app/http/controllers/api/byok"
 	"halostory_go_backend/internal/app/http/middlewares"
 	"halostory_go_backend/internal/app/models"
 	"net/http"
@@ -29,8 +30,8 @@ func SetupAPI(r *gin.Engine) {
 	// App Status (Public)
 	api.GET("/app/status", apiControllers.AppStatus)
 
-	// Authentication routes (Public)
-	api.POST("/login", auth.Login)
+	// Authentication routes (Static token required — like bluetalk's static.auth)
+	api.POST("/login", middlewares.CheckStaticToken(), auth.Login)
 	api.POST("/register", auth.Register)
 
 	// Password Reset Routes (Public)
@@ -86,6 +87,12 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/user/update-name", auth.UpdateName)
 	protected.POST("/user/update-password", auth.UpdatePassword)
 	protected.POST("/user/update-persona", auth.UpdatePersona)
+
+	// ─── AI Chat ───
+	protected.GET("/chat/status/:uuid", byokControllers.ChatStatus)
+
+	// ─── BYOK Endpoints ───
+	protected.POST("/byok/gemini/chat", byokControllers.GeminiChat)
 
 	// ─── Admin Panel ───
 	admin := protected.Group("/admin", middlewares.CheckAdmin())
