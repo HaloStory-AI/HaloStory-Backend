@@ -58,6 +58,34 @@ func ClaudeChat(c *gin.Context) {
 		return
 	}
 
+	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
+		Messages:         req.Messages,
+		APIKey:           req.APIKey,
+		Model:            req.Model,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		TopK:             req.TopK,
+		MaxTokens:        req.MaxTokens,
+		Stop:             req.Stop,
+		Reasoning:        req.Reasoning,
+		Summary:          req.Summary,
+		IsSummarize:      req.IsSummarize,
+		Language:         req.Language,
+		HistoryDepth:     req.HistoryDepth,
+		IsGroup:          req.IsGroup,
+		IsDisableBond:    req.IsDisableBond,
+		UserPersona:      req.UserPersona,
+		BotIDs:           req.BotIDs,
+		ExistingMemories: req.ExistingMemories,
+		BotID:            req.BotID,
+	}); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "Input validation failed",
+			"message": err.Message,
+		})
+		return
+	}
+
 	encryptedKey, err := utils.EncryptBYOKAPIKey(req.APIKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

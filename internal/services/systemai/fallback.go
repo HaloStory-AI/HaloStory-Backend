@@ -32,20 +32,12 @@ func getSystemApiKeys(label string) []string {
 	return keys
 }
 
-func selectKey(provider string, keys []string, isVip bool) (string, int) {
+func selectKey(keys []string) (string, int) {
 	if len(keys) == 0 {
 		return "", 0
 	}
-	if isVip {
-		idxKey := fmt.Sprintf("vip_key_index_%s", provider)
-		val, err := services.RedisClient.Get(services.RedisCtx, idxKey).Int()
-		if err != nil {
-			val = 0
-		}
-		idx := val % len(keys)
-		return keys[idx], idx
-	}
-	return keys[rand.Intn(len(keys))], 0
+	idx := rand.Intn(len(keys))
+	return keys[idx], idx
 }
 
 func rotateKey(provider string, currentIdx int) {
@@ -292,7 +284,7 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 				Status:   "skipped",
 				Detail:   "chain timeout exceeded",
 			})
-			continue
+			break
 		}
 
 		label := entry.Config.Label
@@ -319,7 +311,14 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 		}
 
 		for attempt := 0; attempt < len(keys); attempt++ {
-			key, idx := selectKey(entry.Provider, keys, isVip)
+			var key string
+			var idx int
+			if isVip {
+				idx = attempt
+				key = keys[idx%len(keys)]
+			} else {
+				key, idx = selectKey(keys)
+			}
 
 			var resp interface{}
 			var statusCode int
@@ -369,6 +368,9 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 					continue
 				}
 				resetProviderCircuit(entry.Provider)
+				if isVip {
+					rotateKey(entry.Provider, idx)
+				}
 				result.Response = normalized
 				result.Content = content
 				result.StatusCode = statusCode
@@ -385,9 +387,6 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 				errMsg = callErr.Error()
 			}
 			recordProviderFailure(entry.Provider)
-			if isVip {
-				rotateKey(entry.Provider, idx)
-			}
 			result.Pings = append(result.Pings, PingLog{
 				Provider: entry.Provider,
 				Model:    entry.Model,

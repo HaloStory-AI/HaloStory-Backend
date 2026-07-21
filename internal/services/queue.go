@@ -59,53 +59,38 @@ func DeleteChatResult(uuid string) error {
 	return RedisClient.Del(RedisCtx, key).Err()
 }
 
+const updateStatusScript = `
+local data = redis.call('GET', KEYS[1])
+if not data then return nil end
+local payload = cjson.decode(data)
+payload['status'] = ARGV[1]
+if ARGV[2] ~= '' then
+	payload['response'] = cjson.decode(ARGV[2])
+	payload['status_code'] = tonumber(ARGV[3])
+end
+redis.call('SETEX', KEYS[1], ARGV[4], cjson.encode(payload))
+return "OK"
+`
+
 func UpdateChatStatus(uuid string, status ChatStatus) error {
 	key := fmt.Sprintf("chat:%s", uuid)
-	data, err := RedisClient.Get(RedisCtx, key).Bytes()
-	if err != nil {
-		return err
+	err := RedisClient.Eval(RedisCtx, updateStatusScript, []string{key},
+		string(status), "", "0", int(chatTTL.Seconds())).Err()
+	if err == redis.Nil {
+		return nil
 	}
-
-	var payload ChatPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
-	}
-
-	payload.Status = status
-	updated, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	return RedisClient.SetEx(RedisCtx, key, string(updated), chatTTL).Err()
+	return err
 }
 
 func MarkChatCompleted(uuid string, response json.RawMessage, statusCode int) error {
 	key := fmt.Sprintf("chat:%s", uuid)
-	data, err := RedisClient.Get(RedisCtx, key).Bytes()
-	if err != nil {
-		if err == redis.Nil {
-			log.Printf("Queue: chat:%s not found for markCompleted", uuid)
-			return nil
-		}
-		return err
+	err := RedisClient.Eval(RedisCtx, updateStatusScript, []string{key},
+		string(ChatStatusCompleted), string(response), statusCode, int(chatTTL.Seconds())).Err()
+	if err == redis.Nil {
+		log.Printf("Queue: chat:%s not found for markCompleted", uuid)
+		return nil
 	}
-
-	var payload ChatPayload
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return err
-	}
-
-	payload.Status = ChatStatusCompleted
-	payload.Response = response
-	payload.StatusCode = statusCode
-
-	updated, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	return RedisClient.SetEx(RedisCtx, key, string(updated), chatTTL).Err()
+	return err
 }
 
 func SetCooldown(userID uint, ttl time.Duration) error {

@@ -88,11 +88,18 @@ func main() {
 	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: 6", maxWorkers)
 
 	go func() {
+		backoff := 100 * time.Millisecond
 		for {
 			_, data, err := services.Dequeue("ai-chat", 5*time.Second)
 			if err != nil {
+				time.Sleep(backoff)
+				backoff *= 2
+				if backoff > 10*time.Second {
+					backoff = 10 * time.Second
+				}
 				continue
 			}
+			backoff = 100 * time.Millisecond
 
 			if isSystemAIJob(data) {
 				sysSem <- struct{}{}
@@ -240,9 +247,9 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 	systemText := ""
 	isGemma := strings.Contains(data.Model, "gemma")
 	isModernGemma := false
-	if len(data.Model) >= 10 {
-		lastChar := data.Model[len(data.Model)-1]
-		isModernGemma = isGemma && lastChar >= '2' && lastChar <= '9'
+	if isGemma && len(data.Model) >= 7 {
+		v := data.Model[6]
+		isModernGemma = v >= '2' && v <= '9'
 	}
 	supportsSystemInstruction := !isGemma || isModernGemma
 
@@ -900,16 +907,18 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		userPersona = &data.UserPersona
 	}
 
-	messages = byok.InjectByokSystemPrompt(
-		messages, &botID, &lang, &historyDepth, contextLimit,
-		summary, &userID, data.IsDisableBond, userPersona,
-	)
-
-	if data.IsGroup && len(data.BotIDs) > 1 {
-		primaryBotID := botID
-		messages = byok.InjectGroupContext(
-			messages, data.BotIDs, &primaryBotID, lang, &userID,
+	if data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL) {
+		messages = byok.InjectByokSystemPrompt(
+			messages, &botID, &lang, &historyDepth, contextLimit,
+			summary, &userID, data.IsDisableBond, userPersona,
 		)
+
+		if data.IsGroup && len(data.BotIDs) > 1 {
+			primaryBotID := botID
+			messages = byok.InjectGroupContext(
+				messages, data.BotIDs, &primaryBotID, lang, &userID,
+			)
+		}
 	}
 
 	openaiMessages := make([]byok.OpenAIChatMessage, 0, len(messages))
@@ -1216,53 +1225,60 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 
 	openaiFormat := byok.ConvertClaudeToOpenAIFormat(claudeResp, data.Model)
 
-	if len(openaiFormat["choices"].([]map[string]interface{})) > 0 {
-		choices := openaiFormat["choices"].([]map[string]interface{})
-		msg := choices[0]["message"].(map[string]string)
-		content := msg["content"]
+	content := ""
+	var msg map[string]string
+	var msgOK bool
+	choices, choicesOK := openaiFormat["choices"].([]map[string]interface{})
+	if choicesOK && len(choices) > 0 {
+		msg, msgOK = choices[0]["message"].(map[string]string)
+		if msgOK {
+			content = msg["content"]
+		}
+	}
 
-		if content != "" {
-			content = byok.ProcessAIResponse(content)
-			parsed := byok.ParseBondTags(content)
+	if content != "" {
+		content = byok.ProcessAIResponse(content)
+		parsed := byok.ParseBondTags(content)
+		if msgOK {
 			msg["content"] = parsed.CleanText
 			choices[0]["message"] = msg
 			openaiFormat["choices"] = choices
+		}
 
-			var bot models.Bot
-			database.DB.Where("bot_id = ?", data.BotID).First(&bot)
+		var bot models.Bot
+		database.DB.Where("bot_id = ?", data.BotID).First(&bot)
 
-			var user models.User
-			database.DB.First(&user, uint(data.UserID))
+		var user models.User
+		database.DB.First(&user, uint(data.UserID))
 
-			if bot.BotID != "" && user.ID != 0 {
-				messagesRaw, _ := base64.StdEncoding.DecodeString(data.Messages)
-				var originalMessages []byok.Message
-				_ = json.Unmarshal(messagesRaw, &originalMessages)
+		if bot.BotID != "" && user.ID != 0 {
+			messagesRaw, _ := base64.StdEncoding.DecodeString(data.Messages)
+			var originalMessages []byok.Message
+			_ = json.Unmarshal(messagesRaw, &originalMessages)
 
-				lastUserMessage := ""
-				for i := len(originalMessages) - 1; i >= 0; i-- {
-					if originalMessages[i].Role == "user" {
-						lastUserMessage = originalMessages[i].Content
-						break
-					}
+			lastUserMessage := ""
+			for i := len(originalMessages) - 1; i >= 0; i-- {
+				if originalMessages[i].Role == "user" {
+					lastUserMessage = originalMessages[i].Content
+					break
 				}
-
-				byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
 			}
 
-			if !data.IsGroup && !data.IsDisableBond {
-				bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
+			byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
+		}
 
-				openaiFormat["bond_event"] = bondResult.BondEvent
-				openaiFormat["bond_status"] = bondResult.BondStatus
-				openaiFormat["relationship_label"] = bondResult.RelationshipLabel
-				openaiFormat["bond_level"] = bondResult.BondLevel
-			} else {
-				openaiFormat["bond_event"] = nil
-				openaiFormat["bond_status"] = nil
-				openaiFormat["relationship_label"] = nil
-				openaiFormat["bond_level"] = nil
-			}
+		if !data.IsGroup && !data.IsDisableBond {
+			bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
+
+			openaiFormat["bond_event"] = bondResult.BondEvent
+			openaiFormat["bond_status"] = bondResult.BondStatus
+			openaiFormat["relationship_label"] = bondResult.RelationshipLabel
+			openaiFormat["bond_level"] = bondResult.BondLevel
+		} else {
+			openaiFormat["bond_event"] = nil
+			openaiFormat["bond_status"] = nil
+			openaiFormat["relationship_label"] = nil
+			openaiFormat["bond_level"] = nil
 		}
 	}
 

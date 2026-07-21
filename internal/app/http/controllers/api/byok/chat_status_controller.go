@@ -31,8 +31,6 @@ func ChatStatus(c *gin.Context) {
 
 	status, _ := result["status"].(string)
 	if status == "completed" {
-		services.DeleteChatResult(uuid)
-
 		statusCode := http.StatusOK
 		if code, ok := result["status_code"].(float64); ok {
 			statusCode = int(code)
@@ -40,6 +38,8 @@ func ChatStatus(c *gin.Context) {
 
 		responseData := result["response"]
 		c.JSON(statusCode, responseData)
+
+		services.DeleteChatResult(uuid)
 		return
 	}
 

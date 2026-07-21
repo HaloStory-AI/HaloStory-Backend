@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"time"
 
 	"halostory_go_backend/internal/config"
@@ -10,8 +11,10 @@ import (
 
 // GenerateJWT membuat JWT token baru berdasarkan user ID
 func GenerateJWT(userID uint) (string, error) {
-	// Ambil APP_KEY dari .env (atau default fallback jika kosong)
-	secretKey := config.Env("APP_KEY", "halo_story_default_secret_key")
+	secretKey := config.Env("APP_KEY", "")
+	if secretKey == "" {
+		return "", errors.New("APP_KEY is not set in environment")
+	}
 
 	// Buat claims (payload token)
 	claims := jwt.MapClaims{

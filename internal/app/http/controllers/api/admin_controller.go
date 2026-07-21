@@ -617,3 +617,196 @@ func AdminUpdateStudentRequestStatus(c *gin.Context) {
 		"message": "Status updated successfully",
 	})
 }
+
+// ───────────────────── Admin: VIP ─────────────────────
+
+func AdminMakeVip(c *gin.Context) {
+	userID := c.Param("id")
+
+	var req struct {
+		Duration int `json:"duration" form:"duration"`
+	}
+	if err := c.ShouldBind(&req); err != nil || req.Duration < 1 || req.Duration > 3650 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Duration wajib diisi (1-3650 hari).",
+		})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "User tidak ditemukan.",
+		})
+		return
+	}
+
+	now := time.Now()
+	expiresAt := now.AddDate(0, 0, req.Duration)
+
+	// Extend if already VIP
+	if user.Role == "vip" && user.VipExpiresAt != nil && user.VipExpiresAt.After(now) {
+		expiresAt = user.VipExpiresAt.AddDate(0, 0, req.Duration)
+	}
+
+	database.DB.Model(&user).Updates(map[string]interface{}{
+		"role":           "vip",
+		"vip_started_at": now,
+		"vip_expires_at": expiresAt,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "VIP granted successfully",
+		"vip_expires_at": expiresAt,
+	})
+}
+
+// ───────────────────── Admin: Ban / Unban ─────────────────────
+
+func AdminBanUser(c *gin.Context) {
+	userID := c.Param("id")
+
+	var req struct {
+		Reason   string `json:"reason" form:"reason"`
+		Duration string `json:"duration" form:"duration"` // "permanent", "1", "7", "30"
+	}
+	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.Reason) == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Reason wajib diisi.",
+		})
+		return
+	}
+
+	req.Duration = strings.TrimSpace(req.Duration)
+
+	var bannedUntil *time.Time
+	switch req.Duration {
+	case "1":
+		t := time.Now().AddDate(0, 0, 1)
+		bannedUntil = &t
+	case "7":
+		t := time.Now().AddDate(0, 0, 7)
+		bannedUntil = &t
+	case "30":
+		t := time.Now().AddDate(0, 0, 30)
+		bannedUntil = &t
+	case "permanent", "":
+		bannedUntil = nil
+	default:
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Duration harus 'permanent', '1', '7', atau '30'.",
+		})
+		return
+	}
+
+	reason := req.Reason
+	result := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"is_banned":    true,
+		"ban_reason":   reason,
+		"banned_until": bannedUntil,
+	})
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "User tidak ditemukan.",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User banned successfully",
+	})
+}
+
+func AdminUnbanUser(c *gin.Context) {
+	userID := c.Param("id")
+
+	result := database.DB.Model(&models.User{}).Where("id = ?", userID).Updates(map[string]interface{}{
+		"is_banned":    false,
+		"ban_reason":   nil,
+		"banned_until": nil,
+	})
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "User tidak ditemukan.",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User unbanned successfully",
+	})
+}
+
+// ───────────────────── Admin: Settings ─────────────────────
+
+func AdminGetSettings(c *gin.Context) {
+	var settings []models.AppSetting
+	database.DB.Find(&settings)
+
+	result := make(map[string]*string)
+	for _, s := range settings {
+		result[s.Key] = s.Value
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func AdminUpdateSettings(c *gin.Context) {
+	var req map[string]interface{}
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Format request tidak valid",
+		})
+		return
+	}
+
+	for key, val := range req {
+		var strVal string
+		switch v := val.(type) {
+		case string:
+			strVal = v
+		case bool:
+			strVal = fmt.Sprintf("%t", v)
+		default:
+			continue
+		}
+
+		var existing models.AppSetting
+		result := database.DB.Where("`key` = ?", key).First(&existing)
+		if result.Error == nil {
+			database.DB.Model(&existing).Update("value", strVal)
+		} else {
+			database.DB.Create(&models.AppSetting{Key: key, Value: &strVal})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Settings updated successfully",
+	})
+}
+
+// ───────────────────── Admin: Stats ─────────────────────
+
+type adminStatsResponse struct {
+	HourlyUsers int64 `json:"hourly_users"`
+	DailyUsers  int64 `json:"daily_users"`
+	TotalUsers  int64 `json:"total_users"`
+	TotalBots   int64 `json:"total_bots"`
+}
+
+func AdminGetStats(c *gin.Context) {
+	var stats adminStatsResponse
+
+	database.DB.Model(&models.UserActivity{}).
+		Where("created_at >= ?", time.Now().Add(-time.Hour)).
+		Select("COUNT(DISTINCT user_id)").Scan(&stats.HourlyUsers)
+
+	database.DB.Model(&models.UserActivity{}).
+		Where("created_at >= ?", time.Now().AddDate(0, 0, -1)).
+		Select("COUNT(DISTINCT user_id)").Scan(&stats.DailyUsers)
+
+	database.DB.Model(&models.User{}).Select("COUNT(*)").Scan(&stats.TotalUsers)
+	database.DB.Model(&models.Bot{}).Select("COUNT(*)").Scan(&stats.TotalBots)
+
+	c.JSON(http.StatusOK, stats)
+}

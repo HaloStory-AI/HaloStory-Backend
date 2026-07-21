@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
+	"strings"
 )
 
 type ValidationError struct {
@@ -139,15 +141,16 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 	}
 
 	for i, msg := range req.Messages {
+		idxStr := strconv.Itoa(i)
 		if msg.Role == "" || msg.Content == "" {
-			return &ValidationError{Message: "messages[" + string(rune(i)) + "] must contain 'role' and 'content' fields"}
+			return &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' and 'content' fields"}
 		}
 		allowedRoles := map[string]bool{"user": true, "assistant": true, "system": true}
 		if !allowedRoles[msg.Role] {
-			return &ValidationError{Message: "messages[" + string(rune(i)) + "].role must be one of: user, assistant, system"}
+			return &ValidationError{Message: "messages[" + idxStr + "].role must be one of: user, assistant, system"}
 		}
 		if controlChars.MatchString(msg.Content) {
-			return &ValidationError{Message: "messages[" + string(rune(i)) + "].content contains invalid control characters"}
+			return &ValidationError{Message: "messages[" + idxStr + "].content contains invalid control characters"}
 		}
 	}
 
@@ -180,4 +183,32 @@ func fmtFloat(f float64) string {
 
 func fmtInt(i int) string {
 	return fmt.Sprintf("%d", i)
+}
+
+var TrustedBaseURLs = []string{
+	"api.openai.com",
+	"api.deepseek.com",
+	"api.mistral.ai",
+	"openrouter.ai",
+	"api.z.ai",
+	"api.anthropic.com",
+	"api.groq.com",
+	"api.cohere.ai",
+	"api.cerebras.ai",
+	"integrate.api.nvidia.com",
+	"api.huashang.ai",
+}
+
+func IsTrustedBaseURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Host)
+	for _, trusted := range TrustedBaseURLs {
+		if host == trusted || strings.HasSuffix(host, "."+trusted) {
+			return true
+		}
+	}
+	return false
 }

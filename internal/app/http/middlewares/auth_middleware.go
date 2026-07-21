@@ -30,13 +30,21 @@ func Protected() gin.HandlerFunc {
 		// Ekstrak token dengan membuang tulisan "Bearer "
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 
+		// Pastikan APP_KEY tersedia
+		secretKey := config.Env("APP_KEY", "")
+		if secretKey == "" {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"message": "Server configuration error",
+			})
+			return
+		}
+
 		// Parse dan validasi token
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			// Pastikan algoritma token sesuai
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
-			secretKey := config.Env("APP_KEY", "halo_story_default_secret_key")
 			return []byte(secretKey), nil
 		})
 

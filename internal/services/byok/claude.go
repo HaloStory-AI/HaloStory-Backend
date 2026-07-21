@@ -87,13 +87,13 @@ func CallClaude(apiKey, model string, payload ClaudeRequest, timeout time.Durati
 			}
 			return nil, 0, fmt.Errorf("request failed after %d attempts: %w", maxRetries, lastErr)
 		}
-		defer lastResp.Body.Close()
-
 		if lastResp.StatusCode == 429 {
+			lastResp.Body.Close()
 			return nil, lastResp.StatusCode, fmt.Errorf("rate limited (429)")
 		}
 
 		respBody, err := io.ReadAll(lastResp.Body)
+		lastResp.Body.Close()
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to read response body: %w", err)
 		}

@@ -52,66 +52,73 @@ func SetupAPI(r *gin.Engine) {
 		c.JSON(http.StatusOK, user)
 	})
 
-	// Email Verification Routes
+	// Email Verification Routes (excluded from email verification check)
 	protected.POST("/email/send-verification-otp", auth.SendVerificationOtp)
 	protected.POST("/email/verify", auth.VerifyEmail)
 
-	// Categories Routes
-	protected.GET("/v1/categories", apiControllers.CategoryIndex)
-	protected.GET("/v1/category/:slug", apiControllers.CategoryBots)
+	// Verified-only routes (require email verification)
+	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
+	{
+		// Categories Routes
+		verified.GET("/v1/categories", apiControllers.CategoryIndex)
+		verified.GET("/v1/category/:slug", apiControllers.CategoryBots)
 
-	// Bot & Bond Routes
-	protected.GET("/bots", apiControllers.BotIndex)
-	protected.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
-	protected.GET("/v1/bot-tab", apiControllers.BotTabIndex)
-	protected.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
-	protected.GET("/v1/stories", apiControllers.GetByBondedBots)
+		// Bot & Bond Routes
+		verified.GET("/bots", apiControllers.BotIndex)
+		verified.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
+		verified.GET("/v1/bot-tab", apiControllers.BotTabIndex)
+		verified.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
+		verified.GET("/v1/stories", apiControllers.GetByBondedBots)
 
-	protected.POST("/bots/recruit", apiControllers.BondRecruit)
-	protected.GET("/bots/bond/:bot_id", apiControllers.BondShow)
-	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
-	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
+		verified.POST("/bots/recruit", apiControllers.BondRecruit)
+		verified.GET("/bots/bond/:bot_id", apiControllers.BondShow)
+		verified.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
+		verified.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
 
-	// Calendar Routes
-	protected.POST("/v1/calendar", apiControllers.CalendarIndex)
+		// Calendar Routes
+		verified.POST("/v1/calendar", apiControllers.CalendarIndex)
 
-	// Student Request Routes
-	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
-	protected.POST("/student-requests", apiControllers.StudentRequestStore)
+		// Student Request Routes
+		verified.GET("/student-requests", apiControllers.StudentRequestIndex)
+		verified.POST("/student-requests", apiControllers.StudentRequestStore)
 
-	// Backup Routes
-	protected.POST("/user/backup", apiControllers.BackupStore)
-	protected.GET("/user/restore", apiControllers.BackupRestore)
+		// Backup Routes
+		verified.POST("/user/backup", apiControllers.BackupStore)
+		verified.GET("/user/restore", apiControllers.BackupRestore)
 
-	// User Profile Routes
-	protected.POST("/user/update-email", auth.UpdateEmail)
-	protected.POST("/user/update-name", auth.UpdateName)
-	protected.POST("/user/update-password", auth.UpdatePassword)
-	protected.POST("/user/update-persona", auth.UpdatePersona)
+		// User Profile Routes
+		verified.POST("/user/update-email", auth.UpdateEmail)
+		verified.POST("/user/update-name", auth.UpdateName)
+		verified.POST("/user/update-password", auth.UpdatePassword)
+		verified.POST("/user/update-persona", auth.UpdatePersona)
 
-	// ─── System AI Chat (server-side keys) ───
-	protected.POST("/ai/chat/system", apiControllers.SystemChat)
-	protected.POST("/ai/summarize", apiControllers.Summarize)
-	protected.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
+		// ─── System AI Chat (server-side keys) ───
+		verified.POST("/ai/chat/system", apiControllers.SystemChat)
+		verified.POST("/ai/summarize", apiControllers.Summarize)
+		verified.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
 
-	// ─── BYOK Chat Status (shared polling) ───
-	protected.GET("/chat/status/:uuid", byokControllers.ChatStatus)
+		// ─── BYOK Chat Status (shared polling) ───
+		verified.GET("/chat/status/:uuid", byokControllers.ChatStatus)
 
-	// ─── BYOK Endpoints ───
-	protected.POST("/byok/gemini/chat", byokControllers.GeminiChat)
-	protected.POST("/byok/claude/chat", byokControllers.ClaudeChat)
-	protected.POST("/byok/mistral/chat", byokControllers.MistralChat)
-	protected.POST("/byok/deepseek/chat", byokControllers.DeepSeekChat)
-	protected.POST("/byok/openrouter/chat", byokControllers.OpenRouterChat)
-	protected.POST("/byok/zai/chat", byokControllers.ZAIChat)
-	protected.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
-	protected.POST("/byok/models", byokControllers.FetchModels)
+		// ─── BYOK Endpoints ───
+		verified.POST("/byok/gemini/chat", byokControllers.GeminiChat)
+		verified.POST("/byok/claude/chat", byokControllers.ClaudeChat)
+		verified.POST("/byok/mistral/chat", byokControllers.MistralChat)
+		verified.POST("/byok/deepseek/chat", byokControllers.DeepSeekChat)
+		verified.POST("/byok/openrouter/chat", byokControllers.OpenRouterChat)
+		verified.POST("/byok/zai/chat", byokControllers.ZAIChat)
+		verified.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
+		verified.POST("/byok/models", byokControllers.FetchModels)
+	}
 
 	// ─── Admin Panel ───
 	admin := protected.Group("/admin", middlewares.CheckAdmin())
 	{
 		admin.GET("/users", apiControllers.AdminGetUsers)
 		admin.PUT("/users/:id/role", apiControllers.AdminChangeUserRole)
+		admin.POST("/users/:id/make-vip", apiControllers.AdminMakeVip)
+		admin.POST("/users/:id/ban", apiControllers.AdminBanUser)
+		admin.POST("/users/:id/unban", apiControllers.AdminUnbanUser)
 		admin.DELETE("/users/:id", apiControllers.AdminDeleteUser)
 
 		admin.GET("/bots", apiControllers.AdminGetBots)
@@ -119,6 +126,11 @@ func SetupAPI(r *gin.Engine) {
 		admin.POST("/bots/import", apiControllers.AdminImportBots)
 		admin.PUT("/bots/:id", apiControllers.AdminUpdateBot)
 		admin.DELETE("/bots/:id", apiControllers.AdminDeleteBot)
+
+		admin.GET("/settings", apiControllers.AdminGetSettings)
+		admin.PUT("/settings", apiControllers.AdminUpdateSettings)
+
+		admin.GET("/stats", apiControllers.AdminGetStats)
 
 		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
 		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)

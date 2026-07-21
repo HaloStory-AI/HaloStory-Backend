@@ -65,6 +65,36 @@ func OpenAICompatibleChat(c *gin.Context) {
 		model = "gpt-3.5-turbo"
 	}
 
+	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
+		Messages:         req.Messages,
+		APIKey:           req.APIKey,
+		Model:            model,
+		BaseURL:          &req.BaseURL,
+		Temperature:      req.Temperature,
+		TopP:             req.TopP,
+		MaxTokens:        req.MaxTokens,
+		Stop:             req.Stop,
+		FrequencyPenalty: req.FrequencyPenalty,
+		PresencePenalty:  req.PresencePenalty,
+		Reasoning:        req.Reasoning,
+		Summary:          req.Summary,
+		IsSummarize:      req.IsSummarize,
+		Language:         req.Language,
+		HistoryDepth:     req.HistoryDepth,
+		IsGroup:          req.IsGroup,
+		IsDisableBond:    req.IsDisableBond,
+		UserPersona:      req.UserPersona,
+		BotIDs:           req.BotIDs,
+		ExistingMemories: req.ExistingMemories,
+		BotID:            req.BotID,
+	}); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "Input validation failed",
+			"message": err.Message,
+		})
+		return
+	}
+
 	encryptedKey, err := utils.EncryptBYOKAPIKey(req.APIKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

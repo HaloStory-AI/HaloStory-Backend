@@ -1,8 +1,9 @@
 package auth
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"halostory_go_backend/internal/app/models"
@@ -15,11 +16,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+func generateOTP() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(1000000))
+	return fmt.Sprintf("%06d", n.Int64())
+}
+
 // SendOtp logic internal untuk generate & simpan otp lalu kirim email
 func SendOtp(email string) {
-	// Generate 6 digit angka
-	rand.Seed(time.Now().UnixNano())
-	otp := fmt.Sprintf("%06d", rand.Intn(1000000))
+	otp := generateOTP()
 
 	// Hash OTP
 	hashedOtp, _ := bcrypt.GenerateFromPassword([]byte(otp), bcrypt.DefaultCost)

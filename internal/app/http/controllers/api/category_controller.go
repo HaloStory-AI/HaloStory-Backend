@@ -125,7 +125,7 @@ func CategoryBots(c *gin.Context) {
 
 		var birthdayStr *string
 		if bot.Birthday != nil {
-			str := bot.Birthday.Format("2007-01-02")
+			str := bot.Birthday.Format("2006-01-02")
 			birthdayStr = &str
 		}
 

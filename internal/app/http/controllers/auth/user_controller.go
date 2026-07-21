@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -19,8 +17,7 @@ import (
 // ───────────────────── Forgot Password ─────────────────────
 
 func sendPasswordResetOtp(email string) {
-	rand.Seed(time.Now().UnixNano())
-	otp := fmt.Sprintf("%06d", rand.Intn(1000000))
+	otp := generateOTP()
 
 	hashedOtp, _ := bcrypt.GenerateFromPassword([]byte(otp), bcrypt.DefaultCost)
 
