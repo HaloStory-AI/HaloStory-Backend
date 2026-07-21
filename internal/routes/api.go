@@ -32,6 +32,7 @@ func SetupAPI(r *gin.Engine) {
 
 	// Authentication routes (Static token required — like bluetalk's static.auth)
 	api.POST("/login", middlewares.CheckStaticToken(), auth.Login)
+	api.GET("/v1/get-call", middlewares.CheckStaticToken(), apiControllers.GetCall)
 	api.POST("/register", auth.Register)
 
 	// Password Reset Routes (Public)
@@ -88,12 +89,23 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/user/update-password", auth.UpdatePassword)
 	protected.POST("/user/update-persona", auth.UpdatePersona)
 
-	// ─── AI Chat ───
+	// ─── System AI Chat (server-side keys) ───
+	protected.POST("/ai/chat/system", apiControllers.SystemChat)
+	protected.POST("/ai/summarize", apiControllers.Summarize)
+	protected.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
+
+	// ─── BYOK Chat Status (shared polling) ───
 	protected.GET("/chat/status/:uuid", byokControllers.ChatStatus)
 
 	// ─── BYOK Endpoints ───
 	protected.POST("/byok/gemini/chat", byokControllers.GeminiChat)
+	protected.POST("/byok/claude/chat", byokControllers.ClaudeChat)
+	protected.POST("/byok/mistral/chat", byokControllers.MistralChat)
+	protected.POST("/byok/deepseek/chat", byokControllers.DeepSeekChat)
+	protected.POST("/byok/openrouter/chat", byokControllers.OpenRouterChat)
+	protected.POST("/byok/zai/chat", byokControllers.ZAIChat)
 	protected.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
+	protected.POST("/byok/models", byokControllers.FetchModels)
 
 	// ─── Admin Panel ───
 	admin := protected.Group("/admin", middlewares.CheckAdmin())

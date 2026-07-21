@@ -1,0 +1,180 @@
+package byok
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"halostory_go_backend/internal/app/models"
+	"halostory_go_backend/internal/services"
+	byokSvc "halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/utils"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+)
+
+type OpenAIProviderRequest struct {
+	Messages         []byokSvc.Message       `json:"messages" binding:"required"`
+	APIKey           string                  `json:"api_key" binding:"required"`
+	Model            string                  `json:"model"`
+	Temperature      *float64                `json:"temperature,omitempty"`
+	MaxTokens        *int                    `json:"max_tokens,omitempty"`
+	TopP             *float64                `json:"top_p,omitempty"`
+	Stop             []string                `json:"stop,omitempty"`
+	FrequencyPenalty *float64                `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64                `json:"presence_penalty,omitempty"`
+	TopK             *float64                `json:"top_k,omitempty"`
+	MinP             *float64                `json:"min_p,omitempty"`
+	RepetitionPenalty *float64               `json:"repetition_penalty,omitempty"`
+	IncludeReasoning *bool                   `json:"include_reasoning,omitempty"`
+	Reasoning        *byokSvc.ReasoningConfig `json:"reasoning,omitempty"`
+	Summary          *string                 `json:"summary,omitempty"`
+	IsSummarize      *bool                   `json:"is_summarize,omitempty"`
+	ExistingMemories []string                `json:"existing_memories,omitempty"`
+	Language         *string                 `json:"language,omitempty"`
+	HistoryDepth     *int                    `json:"history_depth,omitempty"`
+	IsGroup          *bool                   `json:"is_group,omitempty"`
+	IsDisableBond    *bool                   `json:"isdisablebond,omitempty"`
+	UserPersona      *string                 `json:"user_persona,omitempty"`
+	BotIDs           []string                `json:"bot_ids,omitempty"`
+	BotID            *string                 `json:"bot_id,omitempty"`
+}
+
+func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, provider, defaultModel string) {
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
+
+	if req.APIKey == "" || len(req.Messages) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "Validation failed",
+			"message": "api_key and messages are required",
+		})
+		return
+	}
+
+	model := req.Model
+	if model == "" {
+		model = defaultModel
+	}
+
+	encryptedKey, err := utils.EncryptBYOKAPIKey(req.APIKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Encryption failed",
+			"message": "Failed to encrypt API key",
+		})
+		return
+	}
+
+	messagesJSON, err := json.Marshal(req.Messages)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Serialization failed",
+			"message": "Failed to serialize messages",
+		})
+		return
+	}
+	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
+
+	uid := uuid.New().String()
+
+	payload := map[string]interface{}{
+		"uuid":     uid,
+		"status":   "queued",
+		"api_key":  encryptedKey,
+		"messages": messagesB64,
+		"base_url": baseURL,
+		"model":    model,
+		"provider": provider,
+		"user_id":  user.ID,
+	}
+
+	if req.Temperature != nil {
+		payload["temperature"] = *req.Temperature
+	}
+	if req.MaxTokens != nil {
+		payload["max_tokens"] = *req.MaxTokens
+	}
+	if req.TopP != nil {
+		payload["top_p"] = *req.TopP
+	}
+	if len(req.Stop) > 0 {
+		payload["stop"] = req.Stop
+	}
+	if req.PresencePenalty != nil {
+		payload["presence_penalty"] = *req.PresencePenalty
+	}
+	if req.FrequencyPenalty != nil {
+		payload["frequency_penalty"] = *req.FrequencyPenalty
+	}
+	if req.TopK != nil {
+		payload["top_k"] = *req.TopK
+	}
+	if req.MinP != nil {
+		payload["min_p"] = *req.MinP
+	}
+	if req.RepetitionPenalty != nil {
+		payload["repetition_penalty"] = *req.RepetitionPenalty
+	}
+	if req.IncludeReasoning != nil {
+		payload["include_reasoning"] = *req.IncludeReasoning
+	}
+	if req.Reasoning != nil {
+		payload["reasoning"] = req.Reasoning
+	}
+	if req.Summary != nil {
+		payload["summary"] = *req.Summary
+	}
+	if req.IsSummarize != nil {
+		payload["is_summarize"] = *req.IsSummarize
+	}
+	if req.BotID != nil {
+		payload["bot_id"] = *req.BotID
+	}
+	if req.Language != nil {
+		payload["language"] = *req.Language
+	}
+	if req.HistoryDepth != nil {
+		payload["history_depth"] = *req.HistoryDepth
+	}
+	if req.IsGroup != nil {
+		payload["is_group"] = *req.IsGroup
+	}
+	if req.IsDisableBond != nil {
+		payload["isdisablebond"] = *req.IsDisableBond
+	}
+	if req.UserPersona != nil {
+		payload["user_persona"] = *req.UserPersona
+	}
+	if len(req.BotIDs) > 0 {
+		payload["bot_ids"] = req.BotIDs
+	}
+	if len(req.ExistingMemories) > 0 {
+		payload["existing_memories"] = req.ExistingMemories
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+
+	if err := services.StoreChatResult(uid, payloadJSON, 10*time.Minute); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Redis error",
+			"message": "Failed to store chat request",
+		})
+		return
+	}
+
+	if err := services.Enqueue("ai-chat", payloadJSON); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Queue error",
+			"message": "Failed to enqueue chat job",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "queued",
+		"uuid":   uid,
+	})
+}

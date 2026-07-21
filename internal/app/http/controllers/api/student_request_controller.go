@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -84,6 +86,19 @@ func StudentRequestStore(c *gin.Context) {
 		return
 	}
 
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
+
+	allowed, retryAfter, err := services.RateLimit("student-request:user:"+fmt.Sprint(user.ID), 5, 12*time.Hour)
+	if err == nil && !allowed {
+		hours := int64(math.Ceil(float64(retryAfter) / 3600))
+		c.JSON(http.StatusTooManyRequests, studentRequestStoreResponse{
+			Success: false,
+			Message: fmt.Sprintf("Kamu sudah mencapai batas maksimal 5 request. Silakan coba lagi dalam %d jam.", hours),
+		})
+		return
+	}
+
 	var input storeStudentRequestInput
 	if err := c.ShouldBind(&input); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -101,9 +116,6 @@ func StudentRequestStore(c *gin.Context) {
 		})
 		return
 	}
-
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
 
 	studentRequest := models.StudentRequest{
 		UserID:      user.ID,

@@ -52,6 +52,9 @@ func AdminGetUsers(c *gin.Context) {
 func AdminChangeUserRole(c *gin.Context) {
 	userID := c.Param("id")
 
+	userVal, _ := c.Get("user")
+	currentUser := userVal.(models.User)
+
 	var req struct {
 		Role string `json:"role" form:"role"`
 	}
@@ -66,6 +69,15 @@ func AdminChangeUserRole(c *gin.Context) {
 	if req.Role != "admin" && req.Role != "Sensei" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"message": "Role harus 'admin' atau 'Sensei'.",
+		})
+		return
+	}
+
+	// Prevent self-demotion to avoid locking out the only admin
+	if fmt.Sprint(currentUser.ID) == userID && req.Role != "admin" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Cannot demote yourself.",
 		})
 		return
 	}
@@ -85,6 +97,17 @@ func AdminChangeUserRole(c *gin.Context) {
 
 func AdminDeleteUser(c *gin.Context) {
 	userID := c.Param("id")
+
+	userVal, _ := c.Get("user")
+	currentUser := userVal.(models.User)
+
+	if fmt.Sprint(currentUser.ID) == userID {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "Cannot delete yourself.",
+		})
+		return
+	}
 
 	result := database.DB.Delete(&models.User{}, userID)
 	if result.RowsAffected == 0 {

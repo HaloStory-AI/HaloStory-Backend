@@ -47,7 +47,12 @@ type OpenAICompatResponse struct {
 	Usage   *OpenAICompatUsage   `json:"usage,omitempty"`
 }
 
-func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, timeout time.Duration) (*OpenAICompatResponse, int, error) {
+type OpenAIRequestOptions struct {
+	ExtraHeaders map[string]string      `json:"extra_headers,omitempty"`
+	ExtraBody    map[string]interface{} `json:"extra_body,omitempty"`
+}
+
+func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, timeout time.Duration, opts *OpenAIRequestOptions) (*OpenAICompatResponse, int, error) {
 	endpoint := baseURL
 	if !strings.Contains(endpoint, "/chat/completions") {
 		endpoint = strings.TrimRight(endpoint, "/") + "/chat/completions"
@@ -57,7 +62,17 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 		payload.Model = model
 	}
 
-	body, err := json.Marshal(payload)
+	bodyMap := make(map[string]interface{})
+	bodyBytes, _ := json.Marshal(payload)
+	json.Unmarshal(bodyBytes, &bodyMap)
+
+	if opts != nil && opts.ExtraBody != nil {
+		for k, v := range opts.ExtraBody {
+			bodyMap[k] = v
+		}
+	}
+
+	body, err := json.Marshal(bodyMap)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -74,6 +89,12 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Content-Type", "application/json")
+
+		if opts != nil && opts.ExtraHeaders != nil {
+			for k, v := range opts.ExtraHeaders {
+				req.Header.Set(k, v)
+			}
+		}
 
 		client := &http.Client{Timeout: timeout}
 		lastResp, lastErr = client.Do(req)

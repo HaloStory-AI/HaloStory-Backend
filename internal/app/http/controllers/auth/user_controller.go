@@ -9,6 +9,7 @@ import (
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,15 @@ func sendPasswordResetOtp(email string) {
 }
 
 func ForgotPassword(c *gin.Context) {
+	allowed, retryAfter, err := services.RateLimit("auth.forgot-password:"+c.ClientIP(), 5, 15*time.Minute)
+	if err == nil && !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":     "Too many attempts. Please try again later.",
+			"retry_after": retryAfter,
+		})
+		return
+	}
+
 	var req struct {
 		Email string `json:"email" form:"email"`
 	}

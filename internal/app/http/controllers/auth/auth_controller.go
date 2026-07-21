@@ -1,11 +1,16 @@
 package auth
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/utils"
-
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -17,10 +22,19 @@ type LoginRequest struct {
 }
 
 func Login(c *gin.Context) {
+	allowed, retryAfter, err := services.RateLimit("auth.login:"+c.ClientIP(), 5, 15*time.Minute)
+	if err == nil && !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":     "Too many attempts. Please try again later.",
+			"retry_after": retryAfter,
+		})
+		return
+	}
+
 	var req LoginRequest
 
 	// Parsing body JSON
-	if err := c.ShouldBind(&req); err != nil {
+	if err = c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Format request tidak valid",
 		})
@@ -39,7 +53,7 @@ func Login(c *gin.Context) {
 	}
 
 	// Cek kecocokan password menggunakan bcrypt (karena Laravel menggunakan bcrypt)
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message": "Email atau password salah",
@@ -85,12 +99,22 @@ type RegisterRequest struct {
 	Email                string `json:"email" form:"email"`
 	Password             string `json:"password" form:"password"`
 	PasswordConfirmation string `json:"password_confirmation" form:"password_confirmation"`
+	DeviceID             string `json:"device_id" form:"device_id"`
 }
 
 func Register(c *gin.Context) {
+	allowed, retryAfter, err := services.RateLimit("auth.register:"+c.ClientIP(), 5, 15*time.Minute)
+	if err == nil && !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":     "Too many attempts. Please try again later.",
+			"retry_after": retryAfter,
+		})
+		return
+	}
+
 	var req RegisterRequest
 
-	if err := c.ShouldBind(&req); err != nil {
+	if err = c.ShouldBind(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"message": "Format request tidak valid",
 		})
@@ -102,6 +126,39 @@ func Register(c *gin.Context) {
 			"message": "Password confirmation tidak cocok",
 		})
 		return
+	}
+
+	// Cek apakah device_id dibanned
+	if req.DeviceID != "" {
+		var deviceBan models.DeviceBan
+		if err := database.DB.Where("device_id = ?", req.DeviceID).First(&deviceBan).Error; err == nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"message": "Perangkat ini telah dibanned. Tidak dapat mendaftar.",
+			})
+			return
+		}
+	}
+
+	// Cek apakah domain email adalah temporary/fake domain
+	parts := strings.SplitN(req.Email, "@", 2)
+	if len(parts) == 2 {
+		domain := parts[1]
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Get("https://fakefilter.net/api/is/fakedomain/" + domain)
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			var result struct {
+				IsFakeDomain bool `json:"isFakeDomain"`
+			}
+			if json.Unmarshal(body, &result) == nil && result.IsFakeDomain {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"success": false,
+					"message": "Email sementara (temporary) tidak diizinkan. Gunakan email permanen.",
+				})
+				return
+			}
+		}
 	}
 
 	// Cek apakah email sudah ada
@@ -132,7 +189,7 @@ func Register(c *gin.Context) {
 	}
 
 	// Simpan ke database
-	if err := database.DB.Create(&user).Error; err != nil {
+	if err = database.DB.Create(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Gagal mendaftarkan user",
 		})

@@ -51,9 +51,10 @@ type ReasoningConfig struct {
 var controlChars = regexp.MustCompile("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 
 const (
-	maxModelLength   = 128
-	maxBaseURLLength = 512
-	maxAPIKeyLength  = 1024
+	DefaultOpenAIModel = "gpt-3.5-turbo"
+	maxModelLength     = 128
+	maxBaseURLLength   = 512
+	maxAPIKeyLength    = 1024
 )
 
 func SanitizeByokInput(req *BYOKRequest) *ValidationError {

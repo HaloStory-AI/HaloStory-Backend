@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"log"
+	"net/http"
+	"time"
 
 	"halostory_go_backend/internal/app/http/middlewares"
 	"halostory_go_backend/internal/config"
@@ -40,6 +44,30 @@ func main() {
 	// Route dasar untuk memastikan server berjalan
 	r.GET("/", func(c *gin.Context) {
 		c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
+	})
+
+	r.GET("/up", func(c *gin.Context) {
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Get("https://icy-recipe-89f8.r8kstudio.workers.dev")
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			var data struct {
+				Status            string `json:"status"`
+				MaintenanceMessage string `json:"maintenance_message"`
+			}
+			if json.Unmarshal(body, &data) == nil && data.Status == "active" {
+				c.String(200, "OK")
+				return
+			}
+			if data.MaintenanceMessage != "" {
+				c.String(503, data.MaintenanceMessage)
+				return
+			}
+			c.String(503, "Maintenance")
+			return
+		}
+		c.String(200, "OK")
 	})
 
 	// Jalankan server di port 3000
