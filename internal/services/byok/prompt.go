@@ -2,6 +2,7 @@ package byok
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"halostory_go_backend/internal/app/models"
@@ -427,4 +428,93 @@ func InjectGroupContext(messages []Message, botIDs []string, primaryBotID *strin
 	}
 
 	return append([]Message{{Role: "system", Content: context}}, messages...)
+}
+
+func BuildSummarizationPrompt(messages []Message, language string, existingMemories []string) string {
+	textToSummarize := ""
+	for _, msg := range messages {
+		role := "User"
+		if msg.Role == "assistant" {
+			role = "Assistant"
+		}
+		textToSummarize += fmt.Sprintf("%s: %s\n", role, msg.Content)
+	}
+
+	lang := language
+	if lang == "" || lang == "id" {
+		lang = "Indonesian"
+	}
+
+	memoryBlock := ""
+	if len(existingMemories) > 0 {
+		memoryBlock = "\nExisting Memory-Worth-Keeping (review and update if needed):\n"
+		for _, mem := range existingMemories {
+			memoryBlock += fmt.Sprintf("- %s\n", mem)
+		}
+	}
+
+	return fmt.Sprintf(`Generate a summary and memory update for the following roleplay conversation in %s.
+
+Respond with exactly two sections using the tags below.
+
+[Chat-Summary]
+This section summarizes only the most recent conversation block (e.g., the last 20 messages).
+Purpose:
+- Preserve conversation continuity.
+- Explain what happened.
+- Capture emotions and relationship progression.
+- Record important events.
+- Mention unresolved situations.
+Rules:
+- Do not rewrite the entire history.
+- Only summarize the current conversation block.
+- Maximum around 300-600 words.
+- Write in chronological order.
+[/Chat-Summary]
+
+[Memory-Worth-Keeping]
+This section stores persistent memories that should survive future summaries.
+Rules:
+- Keep only memories that remain important long-term.
+- Ignore temporary events.
+- Merge with existing memories when appropriate.
+- Update outdated memories.
+- Remove obsolete or contradicted memories.
+- Avoid duplicates.
+- Maximum 5-10 memory items.
+Each memory should be concise and atomic.%s
+[/Memory-Worth-Keeping]
+
+Conversation:
+%s
+
+Now generate both [Chat-Summary] and [Memory-Worth-Keeping] sections.
+`, lang, memoryBlock, textToSummarize)
+}
+
+func ParseSummaryResponse(response string) (summary string, memories []string) {
+	reSummary := regexp.MustCompile(`(?si)\[Chat-Summary\](.*?)\[/Chat-Summary\]`)
+	reMemories := regexp.MustCompile(`(?si)\[Memory-Worth-Keeping\](.*?)\[/Memory-Worth-Keeping\]`)
+
+	if m := reSummary.FindStringSubmatch(response); len(m) > 1 {
+		summary = strings.TrimSpace(m[1])
+	}
+
+	if m := reMemories.FindStringSubmatch(response); len(m) > 1 {
+		rawMemories := strings.TrimSpace(m[1])
+		lines := strings.Split(rawMemories, "\n")
+		reBullet := regexp.MustCompile(`^-\s+(.+)$`)
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if matches := reBullet.FindStringSubmatch(line); len(matches) > 1 {
+				memories = append(memories, strings.TrimSpace(matches[1]))
+			}
+		}
+	}
+
+	if summary == "" && response != "" {
+		summary = strings.TrimSpace(response)
+	}
+
+	return
 }

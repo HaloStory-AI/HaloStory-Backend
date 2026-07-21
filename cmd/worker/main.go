@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -178,6 +179,11 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 	var userPersona *string
 	if data.UserPersona != "" {
 		userPersona = &data.UserPersona
+	}
+
+	if data.IsSummarize {
+		handleGeminiSummarization(uuid, storeKey, data, decryptedKey, messagesJSON)
+		return
 	}
 
 	messages = byok.InjectByokSystemPrompt(
@@ -412,6 +418,96 @@ func markCompleted(uuid, storeKey string, response interface{}, statusCode int) 
 	jsonBytes, _ := json.Marshal(payload)
 	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
 	log.Printf("Worker: Completed job %s with status %d", uuid, statusCode)
+}
+
+func handleGeminiSummarization(uuid, storeKey string, data chatData, decryptedKey string, messagesJSON []byte) {
+	var messages []byok.Message
+	if err := json.Unmarshal(messagesJSON, &messages); err != nil {
+		markError(uuid, storeKey, "Failed to parse messages", 400)
+		return
+	}
+
+	lang := data.Language
+	if lang == "" || lang == "id" {
+		lang = "Indonesian"
+	}
+
+	prompt := byok.BuildSummarizationPrompt(messages, lang, data.ExistingMemories)
+
+	contents := []byok.GeminiContent{
+		{
+			Role:  "user",
+			Parts: []byok.GeminiPart{{Text: prompt}},
+		},
+	}
+
+	genConfig := byok.GenerationConfig{
+		Temperature:     0.9,
+		MaxOutputTokens: 4096,
+	}
+
+	req := byok.GeminiRequest{
+		Contents:         contents,
+		GenerationConfig: genConfig,
+		SafetySettings:   byok.DefaultSafetySettings,
+	}
+
+	geminiResp, statusCode, err := byok.CallGemini(decryptedKey, data.Model, req)
+	if err != nil {
+		log.Printf("Worker: Gemini summarization API error for %s: %v (status %d)", uuid, err, statusCode)
+		errMsg := err.Error()
+		if statusCode > 0 {
+			errMsg = fmt.Sprintf("[ERROR %d] %s", statusCode, errMsg)
+		}
+		markSummaryCompleted(uuid, storeKey, errMsg, []string{}, statusCode, true)
+		return
+	}
+
+	rawContent := ""
+	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
+		rawContent = geminiResp.Candidates[0].Content.Parts[0].Text
+	}
+
+	summary, memories := byok.ParseSummaryResponse(rawContent)
+
+	// Retry with lower temperature if content is empty
+	if summary == "" && rawContent != "" {
+		log.Printf("Worker: Summary content empty for %s, retrying with lower temperature", uuid)
+		genConfig.Temperature = 0.3
+		req.GenerationConfig = genConfig
+		geminiResp, statusCode, err = byok.CallGemini(decryptedKey, data.Model, req)
+		if err == nil && len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
+			rawContent = geminiResp.Candidates[0].Content.Parts[0].Text
+			summary, memories = byok.ParseSummaryResponse(rawContent)
+		}
+	}
+
+	if summary == "" {
+		log.Printf("Worker: No summary content returned for %s after retry", uuid)
+		markSummaryCompleted(uuid, storeKey, "[ERROR 500] No content returned from Gemini API", []string{}, 500, true)
+		return
+	}
+
+	markSummaryCompleted(uuid, storeKey, summary, memories, statusCode, false)
+}
+
+func markSummaryCompleted(uuid, storeKey, summary string, memories []string, statusCode int, isError bool) {
+	response := map[string]interface{}{
+		"summary":              summary,
+		"memory_worth_keeping": memories,
+	}
+	payload := map[string]interface{}{
+		"status":      "completed",
+		"response":    response,
+		"status_code": statusCode,
+	}
+	if isError {
+		payload["error"] = true
+		payload["error_status_code"] = statusCode
+	}
+	jsonBytes, _ := json.Marshal(payload)
+	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
+	log.Printf("Worker: Completed summarization job %s with status %d", uuid, statusCode)
 }
 
 func markError(uuid, storeKey, message string, statusCode int) {
