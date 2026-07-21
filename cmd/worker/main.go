@@ -446,6 +446,15 @@ func handleGeminiSummarization(uuid, storeKey string, data chatData, decryptedKe
 		MaxOutputTokens: 4096,
 	}
 
+	isGemma := strings.Contains(data.Model, "gemma")
+	if isGemma {
+		genConfig.MaxOutputTokens = 32000
+		if genConfig.ThinkingConfig == nil {
+			genConfig.ThinkingConfig = &byok.ThinkingConfig{}
+		}
+		genConfig.ThinkingConfig.ThinkingLevel = "MINIMAL"
+	}
+
 	req := byok.GeminiRequest{
 		Contents:         contents,
 		GenerationConfig: genConfig,
@@ -463,9 +472,10 @@ func handleGeminiSummarization(uuid, storeKey string, data chatData, decryptedKe
 		return
 	}
 
+	openaiResp := byok.ConvertToOpenAIFormat(geminiResp, data.Model)
 	rawContent := ""
-	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
-		rawContent = geminiResp.Candidates[0].Content.Parts[0].Text
+	if len(openaiResp.Choices) > 0 {
+		rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
 	}
 
 	summary, memories := byok.ParseSummaryResponse(rawContent)
@@ -476,8 +486,11 @@ func handleGeminiSummarization(uuid, storeKey string, data chatData, decryptedKe
 		genConfig.Temperature = 0.3
 		req.GenerationConfig = genConfig
 		geminiResp, statusCode, err = byok.CallGemini(decryptedKey, data.Model, req)
-		if err == nil && len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
-			rawContent = geminiResp.Candidates[0].Content.Parts[0].Text
+		if err == nil {
+			openaiResp = byok.ConvertToOpenAIFormat(geminiResp, data.Model)
+			if len(openaiResp.Choices) > 0 {
+				rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+			}
 			summary, memories = byok.ParseSummaryResponse(rawContent)
 		}
 	}
