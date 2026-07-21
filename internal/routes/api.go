@@ -93,6 +93,7 @@ func SetupAPI(r *gin.Engine) {
 
 	// ─── BYOK Endpoints ───
 	protected.POST("/byok/gemini/chat", byokControllers.GeminiChat)
+	protected.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
 
 	// ─── Admin Panel ───
 	admin := protected.Group("/admin", middlewares.CheckAdmin())

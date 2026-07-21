@@ -1,12 +1,11 @@
 package api
 
 import (
-	"fmt"
 	"time"
 
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"net/http"
 
@@ -37,8 +36,6 @@ func CategoryIndex(c *gin.Context) {
 	var categories []models.Category
 	database.DB.Order("name asc").Find(&categories)
 
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
-
 	pinned := make([]gin.H, 0)
 	featured := make([]gin.H, 0)
 	defaultCat := make([]gin.H, 0)
@@ -53,7 +50,7 @@ func CategoryIndex(c *gin.Context) {
 			"id":       cat.ID,
 			"name":     cat.Name,
 			"slug":     cat.Slug,
-			"logo_url": fmt.Sprintf("%s/api/image?path=%s", appUrl, logoUrl),
+			"logo_url": services.ImageURL(logoUrl),
 		}
 
 		if cat.Pinned {
@@ -89,8 +86,6 @@ func CategoryBots(c *gin.Context) {
 	for _, b := range bonds {
 		bondMap[b.BotID] = b
 	}
-
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 
 	var response []botItemResponse
 	for _, bot := range bots {
@@ -139,7 +134,7 @@ func CategoryBots(c *gin.Context) {
 			Name:        bot.Name,
 			Description: bot.Description,
 			Avatar:      bot.Avatar,
-			ImageURL:    fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			ImageURL:    services.ImageURL(avatar),
 			Birthday:    birthdayStr,
 			BondXp:      bondXp,
 			BondHearts:  bondHearts,

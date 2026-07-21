@@ -1,13 +1,12 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,12 +56,11 @@ func GetByBondedBots(c *gin.Context) {
 		avatarMap[a.BotID] = a.Avatar
 	}
 
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 	response := make([]storyItem, 0)
 	for _, s := range stories {
 		var botAvatar *string
 		if avatar, ok := avatarMap[s.BotID]; ok && avatar != nil {
-			url := fmt.Sprintf("%s/api/image?path=%s", appUrl, *avatar)
+			url := services.ImageURL(*avatar)
 			botAvatar = &url
 		}
 

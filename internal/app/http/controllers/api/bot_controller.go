@@ -1,14 +1,13 @@
 package api
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"net/http"
 
@@ -49,8 +48,6 @@ func BotIndex(c *gin.Context) {
 	for _, b := range bonds {
 		bondMap[b.BotID] = b
 	}
-
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 
 	var response []botIndexItem
 	for _, bot := range bots {
@@ -100,7 +97,7 @@ func BotIndex(c *gin.Context) {
 			Name:         bot.Name,
 			Description:  bot.Description,
 			Avatar:       bot.Avatar,
-			ImageURL:     fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			ImageURL:     services.ImageURL(avatar),
 			Background:   bot.Jailbreak,
 			Personality:  bot.Personality,
 			ChatExamples: bot.ChatExamples,

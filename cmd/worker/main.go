@@ -32,6 +32,7 @@ type chatData struct {
 	Messages          string                   `json:"messages"`
 	Model             string                   `json:"model"`
 	Provider          string                   `json:"provider"`
+	BaseURL           string                   `json:"base_url,omitempty"`
 	UserID            float64                  `json:"user_id"`
 	BotID             string                   `json:"bot_id"`
 	Language          string                   `json:"language,omitempty"`
@@ -123,9 +124,14 @@ func processJob(rawData []byte) {
 		database.DB.Create(&models.UserActivity{UserID: userID})
 	}
 
-	if data.Provider != "" && data.Provider != "gemini" {
+	if data.Provider != "" && data.Provider != "gemini" && data.Provider != "openai-compatible" {
 		log.Printf("Worker: Unsupported provider %s for UUID %s", data.Provider, uuid)
 		markError(uuid, storeKey, "Unsupported provider: "+data.Provider, 400)
+		return
+	}
+
+	if data.Provider == "openai-compatible" {
+		processOpenAIChat(uuid, storeKey, data)
 		return
 	}
 
@@ -521,6 +527,254 @@ func markSummaryCompleted(uuid, storeKey, summary string, memories []string, sta
 	jsonBytes, _ := json.Marshal(payload)
 	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
 	log.Printf("Worker: Completed summarization job %s with status %d", uuid, statusCode)
+}
+
+func processOpenAIChat(uuid, storeKey string, data chatData) {
+	decryptedKey, err := utils.DecryptBYOKAPIKey(data.APIKey)
+	if err != nil {
+		log.Printf("Worker: Failed to decrypt API key for %s: %v", uuid, err)
+		markError(uuid, storeKey, "Failed to decrypt API key", 500)
+		return
+	}
+
+	messagesJSON, err := base64.StdEncoding.DecodeString(data.Messages)
+	if err != nil {
+		log.Printf("Worker: Failed to decode messages for %s: %v", uuid, err)
+		markError(uuid, storeKey, "Failed to decode messages", 400)
+		return
+	}
+
+	var messages []byok.Message
+	if err := json.Unmarshal(messagesJSON, &messages); err != nil {
+		log.Printf("Worker: Failed to parse messages for %s: %v", uuid, err)
+		markError(uuid, storeKey, "Failed to parse messages", 400)
+		return
+	}
+
+	model := data.Model
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+	baseURL := data.BaseURL
+	if baseURL == "" {
+		markError(uuid, storeKey, "Missing base_url", 400)
+		return
+	}
+
+	// === Summarization ===
+	if data.IsSummarize {
+		handleOpenAISummarization(uuid, storeKey, data, decryptedKey, messages, model, baseURL)
+		return
+	}
+
+	// === Chat ===
+	userID := uint(data.UserID)
+	botID := data.BotID
+	lang := data.Language
+	if lang == "" {
+		lang = "id"
+	}
+	historyDepth := int(data.HistoryDepth)
+	if historyDepth == 0 {
+		historyDepth = 15
+	}
+	maxTokens := int(data.MaxTokens)
+	if maxTokens == 0 {
+		maxTokens = 2048
+	}
+	var contextLimit *int
+	if maxTokens > 0 {
+		contextLimit = &maxTokens
+	}
+	var summary *string
+	if data.Summary != "" {
+		summary = &data.Summary
+	}
+	var userPersona *string
+	if data.UserPersona != "" {
+		userPersona = &data.UserPersona
+	}
+
+	messages = byok.InjectByokSystemPrompt(
+		messages, &botID, &lang, &historyDepth, contextLimit,
+		summary, &userID, data.IsDisableBond, userPersona,
+	)
+
+	if data.IsGroup && len(data.BotIDs) > 1 {
+		primaryBotID := botID
+		messages = byok.InjectGroupContext(
+			messages, data.BotIDs, &primaryBotID, lang, &userID,
+		)
+	}
+
+	openaiMessages := make([]byok.OpenAIChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		role := msg.Role
+		if role == "system" {
+			role = "system"
+		} else if role == "assistant" {
+			role = "assistant"
+		} else {
+			role = "user"
+		}
+		openaiMessages = append(openaiMessages, byok.OpenAIChatMessage{
+			Role:    role,
+			Content: msg.Content,
+		})
+	}
+
+	temp := 1.0
+	if data.Temperature != 0 {
+		temp = data.Temperature
+	}
+	topP := 1.0
+	if data.TopP != 0 {
+		topP = data.TopP
+	}
+	maxOut := 1000
+	if data.ResponseLength != 0 {
+		maxOut = int(data.ResponseLength)
+	} else if data.MaxTokens != 0 {
+		maxOut = int(data.MaxTokens)
+	}
+	presPenalty := 0.0
+	if data.PresencePenalty != 0 {
+		presPenalty = data.PresencePenalty
+	}
+	freqPenalty := 0.0
+	if data.FrequencyPenalty != 0 {
+		freqPenalty = data.FrequencyPenalty
+	}
+
+	reqPayload := byok.OpenAICompatRequest{
+		Model:            model,
+		Messages:         openaiMessages,
+		Temperature:      &temp,
+		MaxTokens:        &maxOut,
+		TopP:             &topP,
+		FrequencyPenalty: &freqPenalty,
+		PresencePenalty:  &presPenalty,
+		Stop:             data.Stop,
+	}
+
+	openaiResp, statusCode, err := byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 120*time.Second)
+	if err != nil {
+		log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
+		markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+		return
+	}
+
+	if len(openaiResp.Choices) > 0 && openaiResp.Choices[0].Message.Content != "" {
+		content := openaiResp.Choices[0].Message.Content
+		content = byok.ProcessAIResponse(content)
+		parsed := byok.ParseBondTags(content)
+		openaiResp.Choices[0].Message.Content = parsed.CleanText
+
+		var bot models.Bot
+		database.DB.Where("bot_id = ?", data.BotID).First(&bot)
+
+		var user models.User
+		database.DB.First(&user, uint(data.UserID))
+
+		if bot.BotID != "" && user.ID != 0 {
+			messagesRaw, _ := base64.StdEncoding.DecodeString(data.Messages)
+			var originalMessages []byok.Message
+			_ = json.Unmarshal(messagesRaw, &originalMessages)
+
+			lastUserMessage := ""
+			for i := len(originalMessages) - 1; i >= 0; i-- {
+				if originalMessages[i].Role == "user" {
+					lastUserMessage = originalMessages[i].Content
+					break
+				}
+			}
+
+			byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
+		}
+
+		if !data.IsGroup && !data.IsDisableBond {
+			bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
+
+			openaiRespRaw := make(map[string]interface{})
+			jsonBytes, _ := json.Marshal(openaiResp)
+			json.Unmarshal(jsonBytes, &openaiRespRaw)
+			openaiRespRaw["bond_event"] = bondResult.BondEvent
+			openaiRespRaw["bond_status"] = bondResult.BondStatus
+			openaiRespRaw["relationship_label"] = bondResult.RelationshipLabel
+			openaiRespRaw["bond_level"] = bondResult.BondLevel
+
+			resultJSON, _ := json.Marshal(openaiRespRaw)
+			services.StoreChatResult(uuid, resultJSON, 10*time.Minute)
+
+			finalPayload := map[string]interface{}{
+				"status":      "completed",
+				"response":    openaiRespRaw,
+				"status_code": 200,
+			}
+			finalJSON, _ := json.Marshal(finalPayload)
+			services.StoreChatResult(uuid, finalJSON, 10*time.Minute)
+			return
+		}
+	}
+
+	markCompleted(uuid, storeKey, openaiResp, 200)
+}
+
+func handleOpenAISummarization(uuid, storeKey string, data chatData, decryptedKey string, messages []byok.Message, model, baseURL string) {
+	lang := data.Language
+	if lang == "" || lang == "id" {
+		lang = "Indonesian"
+	}
+
+	prompt := byok.BuildSummarizationPrompt(messages, lang, data.ExistingMemories)
+
+	temp := 0.9
+	maxTokens := 16000
+	reqPayload := byok.OpenAICompatRequest{
+		Model: model,
+		Messages: []byok.OpenAIChatMessage{
+			{Role: "user", Content: prompt},
+		},
+		Temperature: &temp,
+		MaxTokens:   &maxTokens,
+	}
+
+	openaiResp, statusCode, err := byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 60*time.Second)
+	if err != nil {
+		log.Printf("Worker: OpenAI summarization API error for %s: %v (status %d)", uuid, err, statusCode)
+		errMsg := err.Error()
+		if statusCode > 0 {
+			errMsg = fmt.Sprintf("[ERROR %d] %s", statusCode, errMsg)
+		}
+		markSummaryCompleted(uuid, storeKey, errMsg, []string{}, statusCode, true)
+		return
+	}
+
+	rawContent := ""
+	if len(openaiResp.Choices) > 0 {
+		rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+	}
+
+	summary, memories := byok.ParseSummaryResponse(rawContent)
+
+	if summary == "" && rawContent != "" {
+		log.Printf("Worker: OpenAI summary content empty for %s, retrying with lower temperature", uuid)
+		temp = 0.3
+		reqPayload.Temperature = &temp
+		openaiResp, statusCode, err = byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 60*time.Second)
+		if err == nil && len(openaiResp.Choices) > 0 {
+			rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+			summary, memories = byok.ParseSummaryResponse(rawContent)
+		}
+	}
+
+	if summary == "" {
+		log.Printf("Worker: No OpenAI summary content returned for %s after retry", uuid)
+		markSummaryCompleted(uuid, storeKey, "[ERROR 500] No content returned from API", []string{}, 500, true)
+		return
+	}
+
+	markSummaryCompleted(uuid, storeKey, summary, memories, statusCode, false)
 }
 
 func markError(uuid, storeKey, message string, statusCode int) {

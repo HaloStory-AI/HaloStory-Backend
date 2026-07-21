@@ -22,6 +22,9 @@ func main() {
 	// Koneksi ke S3
 	services.InitS3()
 
+	// Koneksi ke Cloudinary
+	services.InitCloudinary()
+
 	// Koneksi ke Redis
 	services.InitRedis()
 

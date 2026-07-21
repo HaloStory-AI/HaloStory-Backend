@@ -1,13 +1,12 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +43,6 @@ func CalendarIndex(c *gin.Context) {
 		Select("bot_id, name, avatar, birthday").
 		Find(&bots)
 
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 	response := make([]calendarItem, 0)
 
 	for _, bot := range bots {
@@ -62,7 +60,7 @@ func CalendarIndex(c *gin.Context) {
 		response = append(response, calendarItem{
 			BotID:    bot.BotID,
 			Name:     bot.Name,
-			ImageURL: fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			ImageURL: services.ImageURL(avatar),
 			Birthday: birthdayStr,
 		})
 	}

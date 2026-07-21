@@ -1,11 +1,9 @@
 package api
 
 import (
-	"fmt"
-
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 
 	"net/http"
 
@@ -28,7 +26,6 @@ func BotTabIndex(c *gin.Context) {
 	var bonds []models.UserBotBond
 	database.DB.Preload("Bot").Where("user_id = ?", user.ID).Find(&bonds)
 
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 	var response []botTabItem
 
 	for _, bond := range bonds {
@@ -56,7 +53,7 @@ func BotTabIndex(c *gin.Context) {
 		response = append(response, botTabItem{
 			ID:         bot.BotID,
 			Name:       bot.Name,
-			ImageURL:   fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			ImageURL:   services.ImageURL(avatar),
 			Color:      color,
 			Birthday:   birthdayStr,
 			BondHearts: bond.GetLevel(),
@@ -86,7 +83,6 @@ func RecruitedBotsIndex(c *gin.Context) {
 	var bonds []models.UserBotBond
 	database.DB.Preload("Bot").Where("user_id = ?", user.ID).Find(&bonds)
 
-	appUrl := config.Env("APP_URL", "http://127.0.0.1")
 	var response []recruitedBotItem
 
 	for _, bond := range bonds {
@@ -114,7 +110,7 @@ func RecruitedBotsIndex(c *gin.Context) {
 		response = append(response, recruitedBotItem{
 			ID:          bot.BotID,
 			Name:        bot.Name,
-			ImageURL:    fmt.Sprintf("%s/api/image?path=%s", appUrl, avatar),
+			ImageURL:    services.ImageURL(avatar),
 			Color:       color,
 			Birthday:    birthdayStr,
 			Description: bot.Description,
