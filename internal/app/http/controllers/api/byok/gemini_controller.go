@@ -65,7 +65,7 @@ func GeminiChat(c *gin.Context) {
 
 	uid := uuid.New().String()
 
-	payload := buildPayload(req, encryptedKey, messagesB64, user.ID)
+	payload := buildPayload(req, encryptedKey, messagesB64, user.ID, uid)
 
 	payloadJSON, _ := json.Marshal(payload)
 
@@ -91,8 +91,9 @@ func GeminiChat(c *gin.Context) {
 	})
 }
 
-func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, userID uint) map[string]interface{} {
+func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, userID uint, uid string) map[string]interface{} {
 	payload := map[string]interface{}{
+		"uuid":     uid,
 		"status":   "queued",
 		"api_key":  encryptedKey,
 		"messages": messagesB64,
