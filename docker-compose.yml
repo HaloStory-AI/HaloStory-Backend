@@ -1,43 +1,91 @@
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
   app:
     build:
       context: .
-      target: server
-    ports:
-      - "18000:18000"
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-app
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_DATABASE: ${DB_DATABASE:-halostory}
+      DB_USERNAME: ${DB_USERNAME:-halostory}
+      DB_PASSWORD: ${DB_PASSWORD:-change_me}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     depends_on:
-      - redis
-    restart: unless-stopped
+      redis:
+        condition: service_started
+    ports:
+      - "${APP_HOST_PORT:-3000}:3000"
+    networks:
+      - default
+      - dokploy-network
 
   worker:
     build:
       context: .
-      target: worker
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-worker
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: ["./worker"]
     depends_on:
-      - redis
-    restart: unless-stopped
+      redis:
+        condition: service_started
+    networks:
+      - default
+      - dokploy-network
 
   scheduler:
     build:
       context: .
-      target: scheduler
+      dockerfile: Dockerfile
+    image: halostory-backend:latest
+    pull_policy: never
+    container_name: halostory-scheduler
+    restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    command: ["./scheduler"]
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+    networks:
+      - default
+      - dokploy-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: halostory-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - default
+      - dokploy-network
 
 volumes:
   redis_data:
+
+networks:
+  dokploy-network:
+    external: true

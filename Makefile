@@ -1,39 +1,36 @@
-.PHONY: build run dev vet clean docker-build docker-up
-
-build:
-	go build -o bin/server ./cmd/server
-	go build -o bin/worker ./cmd/worker
-	go build -o bin/scheduler ./cmd/scheduler
-
-run:
-	go run ./cmd/server
-
-worker:
-	go run ./cmd/worker
-
-scheduler:
-	go run ./cmd/scheduler
+.PHONY: dev build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs
 
 dev:
-	go run ./cmd/server &
-	go run ./cmd/worker &
-	go run ./cmd/scheduler &
-	wait
+	air
 
-vet:
-	go vet ./...
+build-server:
+	go build -o ./tmp/server ./cmd/server
 
-tidy:
-	go mod tidy
+build-worker:
+	go build -o ./tmp/worker ./cmd/worker
+
+build-scheduler:
+	go build -o ./tmp/scheduler ./cmd/scheduler
+
+build-all: build-server build-worker build-scheduler
+
+build: build-all
+
+test:
+	go test -v -count=1 ./...
+
+test-coverage:
+	go test -v -count=1 -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
 
 clean:
-	rm -rf bin/
+	rm -rf tmp/ coverage.out coverage.html
 
 docker-build:
 	docker compose build
 
 docker-up:
-	docker compose up -d
+	docker compose up -d --build
 
 docker-down:
 	docker compose down

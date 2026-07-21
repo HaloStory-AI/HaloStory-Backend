@@ -2,16 +2,28 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"rafiq8k-moga/halostory-go-backend/internal/config"
-	"rafiq8k-moga/halostory-go-backend/internal/cron"
-	"rafiq8k-moga/halostory-go-backend/internal/database"
+	"halostory_go_backend/internal/config"
+	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services"
 )
 
 func main() {
-	cfg := config.Load()
-	db := database.NewDB(cfg)
+	config.LoadConfig()
+	database.Connect()
 
-	log.Println("scheduler starting...")
-	cron.Start(cfg, db, nil)
+	log.Println("Scheduler service starting...")
+
+	scheduler := services.StartScheduler()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Scheduler service shutting down...")
+	scheduler.Stop()
+	log.Println("Scheduler service stopped.")
 }

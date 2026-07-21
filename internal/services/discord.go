@@ -6,130 +6,94 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
+	"time"
 
-	"rafiq8k-moga/halostory-go-backend/internal/config"
+	"halostory_go_backend/internal/config"
 )
 
-type DiscordService struct {
-	webhookURL       string
-	childSafetyURL   string
-	client           *http.Client
-}
-
-func NewDiscordService(cfg *config.Config) *DiscordService {
-	return &DiscordService{
-		webhookURL:     cfg.DiscordWebhookURL,
-		childSafetyURL: cfg.DiscordChildSafetyWebhook,
-		client:         &http.Client{},
-	}
-}
+var discordHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type discordEmbed struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description,omitempty"`
-	Color       int               `json:"color,omitempty"`
-	Fields      []discordField    `json:"fields,omitempty"`
-	Footer      *discordFooter    `json:"footer,omitempty"`
+	Author      discordAuthor `json:"author"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	Color       int           `json:"color,omitempty"`
 }
 
-type discordField struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Inline bool   `json:"inline,omitempty"`
-}
-
-type discordFooter struct {
-	Text string `json:"text"`
+type discordAuthor struct {
+	Name string `json:"name"`
 }
 
 type discordPayload struct {
-	Content string         `json:"content,omitempty"`
-	Embeds  []discordEmbed `json:"embeds,omitempty"`
+	Content string        `json:"content"`
+	Embeds  []discordEmbed `json:"embeds"`
 }
 
-func (s *DiscordService) sendWebhook(url string, payload discordPayload) error {
-	if url == "" {
-		log.Printf("[discord dry-run] %+v", payload)
-		return nil
+func getWebhookURL() string {
+	return config.Env("DISCORD_WEBHOOK_URL", "")
+}
+
+func sendDiscord(payload discordPayload) {
+	webhookURL := getWebhookURL()
+	if webhookURL == "" {
+		return
 	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("discord marshal: %w", err)
+		log.Println("Discord: Gagal marshal payload:", err)
+		return
 	}
 
-	resp, err := s.client.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := discordHTTPClient.Post(webhookURL, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("discord post: %w", err)
+		log.Println("Discord: Gagal mengirim webhook:", err)
+		return
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("discord webhook returned status %d", resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		log.Printf("Discord: Webhook returned status %d", resp.StatusCode)
 	}
-	return nil
 }
 
-func (s *DiscordService) SendStudentRequest(userName, studentName string) error {
-	return s.sendWebhook(s.webhookURL, discordPayload{
-		Embeds: []discordEmbed{{
-			Title:       "New Student Request",
-			Description: fmt.Sprintf("**%s** requested to adopt **%s**", userName, studentName),
-			Color:       0x3498db,
-		}},
-	})
-}
-
-func (s *DiscordService) SendRequestApproved(userName, studentName string) error {
-	return s.sendWebhook(s.webhookURL, discordPayload{
-		Content: "@everyone",
-		Embeds: []discordEmbed{{
-			Title:       "Request Approved",
-			Description: fmt.Sprintf("**%s**'s request for **%s** has been approved!", userName, studentName),
-			Color:       0x2ecc71,
-		}},
-	})
-}
-
-func (s *DiscordService) SendRequestRejected(userName, studentName string) error {
-	return s.sendWebhook(s.webhookURL, discordPayload{
-		Embeds: []discordEmbed{{
-			Title:       "Request Rejected",
-			Description: fmt.Sprintf("**%s**'s request for **%s** was rejected.", userName, studentName),
-			Color:       0xe74c3c,
-		}},
-	})
-}
-
-func (s *DiscordService) SendChildSafetyAlert(botName string, userID uint, userInput, aiResponse, status string) error {
-	url := s.childSafetyURL
-	if url == "" {
-		url = s.webhookURL
-	}
-
-	truncate := func(s string, n int) string {
-		if len(s) > n {
-			return s[:n] + "..."
-		}
-		return s
-	}
-
-	color := 0xe67e22
-	if status == "bypassed" {
-		color = 0xe74c3c
-	}
-
-	return s.sendWebhook(url, discordPayload{
-		Embeds: []discordEmbed{{
-			Title: fmt.Sprintf("Child Safety Alert (%s)", status),
-			Description: fmt.Sprintf("Bot **%s** triggered child safety with user **#%d**", botName, userID),
-			Color: color,
-			Fields: []discordField{
-				{Name: "User Input", Value: truncate(userInput, 500), Inline: false},
-				{Name: "AI Response", Value: truncate(aiResponse, 500), Inline: false},
+func SendStudentRequest(userName, studentName string) {
+	sendDiscord(discordPayload{
+		Content: "Character Request",
+		Embeds: []discordEmbed{
+			{
+				Author:      discordAuthor{Name: "User = " + userName},
+				Title:       "Request",
+				Description: fmt.Sprintf("Hei... Someone request a Character name: %s By: %s\nRequested at: %s", studentName, userName, time.Now().Format("2006-01-02 15:04:05")),
 			},
-			Footer: &discordFooter{Text: strings.ToUpper(status)},
-		}},
+		},
+	})
+}
+
+func SendRequestApproved(userName, studentName string) {
+	sendDiscord(discordPayload{
+		Content: "Character Request Approved @everyone",
+		Embeds: []discordEmbed{
+			{
+				Author:      discordAuthor{Name: "User = " + userName},
+				Title:       "Request Approved",
+				Description: fmt.Sprintf("Hei... Someone request a Character name: %s By: %s Has been approved, yay :)", studentName, userName),
+				Color:       3066993,
+			},
+		},
+	})
+}
+
+func SendRequestRejected(userName, studentName string) {
+	sendDiscord(discordPayload{
+		Content: "Character Request Rejected",
+		Embeds: []discordEmbed{
+			{
+				Author:      discordAuthor{Name: "User = " + userName},
+				Title:       "Request Rejected",
+				Description: fmt.Sprintf("Sorry... Someone request a Character name: %s By: %s Has been Rejected. Sorry, sensei...", studentName, userName),
+				Color:       15277667,
+			},
+		},
 	})
 }

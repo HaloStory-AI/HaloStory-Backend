@@ -1,55 +1,75 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
+	"io"
 	"log"
+	"net/http"
+	"time"
 
-	"rafiq8k-moga/halostory-go-backend/internal/config"
-	"rafiq8k-moga/halostory-go-backend/internal/database"
-	"rafiq8k-moga/halostory-go-backend/internal/routes"
+	"halostory_go_backend/internal/app/http/middlewares"
+	"halostory_go_backend/internal/config"
+	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/routes"
+	"halostory_go_backend/internal/services"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/redis/go-redis/v9"
+	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	cfg := config.Load()
+	// Load environment variables dari .env
+	config.LoadConfig()
 
-	db := database.NewDB(cfg)
+	// Koneksi ke Database
+	database.Connect()
 
-	var rdb *redis.Client
-	if cfg.RedisAddr != "" {
-		rdb = redis.NewClient(&redis.Options{
-			Addr:     cfg.RedisAddr,
-			Password: cfg.RedisPassword,
-			DB:       cfg.RedisDB,
-		})
-		_, err := rdb.Ping(context.Background()).Result()
-		if err != nil {
-			log.Printf("redis connection failed (auth will work without rate limiting): %v", err)
-			rdb = nil
-		} else {
-			log.Println("redis connected")
-		}
-	}
+	// Koneksi ke S3
+	services.InitS3()
 
-	app := fiber.New(fiber.Config{
-		AppName: cfg.AppName,
+	// Koneksi ke Cloudinary
+	services.InitCloudinary()
+
+	// Koneksi ke Redis
+	services.InitRedis()
+
+	// Inisialisasi instance Gin baru dengan middleware global
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	r.Use(middlewares.SetupCORS())
+
+	// Daftarkan routing (mirip seperti register di Laravel)
+	routes.SetupAPI(r)
+
+	// Route dasar untuk memastikan server berjalan
+	r.GET("/", func(c *gin.Context) {
+		c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
 	})
 
-	app.Use(recover.New())
-	app.Use(logger.New())
-	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowMethods: "*",
-		AllowHeaders: "*",
-	}))
+	r.GET("/up", func(c *gin.Context) {
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Get("https://icy-recipe-89f8.r8kstudio.workers.dev")
+		if err == nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			var data struct {
+				Status            string `json:"status"`
+				MaintenanceMessage string `json:"maintenance_message"`
+			}
+			if json.Unmarshal(body, &data) == nil && data.Status == "active" {
+				c.String(200, "OK")
+				return
+			}
+			if data.MaintenanceMessage != "" {
+				c.String(503, data.MaintenanceMessage)
+				return
+			}
+			c.String(503, "Maintenance")
+			return
+		}
+		c.String(200, "OK")
+	})
 
-	routes.Register(app, cfg, db, rdb)
-
-	log.Printf("server starting on :18000")
-	log.Fatal(app.Listen(":18000"))
+	// Jalankan server di port 3000
+	log.Fatal(r.Run(":3000"))
 }
