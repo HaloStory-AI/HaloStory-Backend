@@ -930,7 +930,15 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		userPersona = &data.UserPersona
 	}
 
-	if data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL) {
+	shouldInject := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
+	if !shouldInject {
+		var usr models.User
+		if err := database.DB.First(&usr, userID).Error; err == nil && usr.Role == "admin" {
+			shouldInject = true
+		}
+	}
+
+	if shouldInject {
 		messages = byok.InjectByokSystemPrompt(
 			messages, &botID, &lang, &historyDepth, contextLimit,
 			summary, &userID, data.IsDisableBond, userPersona,
