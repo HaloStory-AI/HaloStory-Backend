@@ -19,6 +19,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-change_me}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       redis:
         condition: service_started
@@ -42,10 +44,18 @@ services:
       DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["./worker"]
     depends_on:
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - default
       - dokploy-network
@@ -64,6 +74,8 @@ services:
       DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["./scheduler"]
     depends_on:
       redis:

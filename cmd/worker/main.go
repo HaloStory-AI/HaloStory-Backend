@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -88,6 +89,18 @@ func main() {
 	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: 6", maxWorkers)
 
 	go func() {
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		})
+		log.Printf("Worker health check listening on :3001")
+		if err := http.ListenAndServe(":3001", nil); err != nil {
+			log.Printf("Worker health check server error: %v", err)
+		}
+	}()
+
+	go func() {
 		backoff := 100 * time.Millisecond
 		for {
 			_, data, err := services.Dequeue("ai-chat", 5*time.Second)
@@ -104,13 +117,23 @@ func main() {
 			if isSystemAIJob(data) {
 				sysSem <- struct{}{}
 				go func(d []byte) {
-					defer func() { <-sysSem }()
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Worker: RECOVERED panic in sys goroutine: %v", r)
+						}
+						<-sysSem
+					}()
 					processJob(d)
 				}(data)
 			} else {
 				mainSem <- struct{}{}
 				go func(d []byte) {
-					defer func() { <-mainSem }()
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("Worker: RECOVERED panic in main goroutine: %v", r)
+						}
+						<-mainSem
+					}()
 					processJob(d)
 				}(data)
 			}

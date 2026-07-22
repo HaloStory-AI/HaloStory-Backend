@@ -64,11 +64,16 @@ func CallClaude(apiKey, model string, payload ClaudeRequest, timeout time.Durati
 		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	deadline := time.Now().Add(180 * time.Second)
 	maxRetries := 10
 	var lastResp *http.Response
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if time.Now().After(deadline) {
+			return nil, 0, fmt.Errorf("deadline exceeded after %d attempts", attempt-1)
+		}
+
 		req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to create request: %w", err)

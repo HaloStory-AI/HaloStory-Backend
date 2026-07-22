@@ -16,7 +16,7 @@ var DB *gorm.DB
 
 func Connect() {
 	// Format DSN (Data Source Name)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Asia%%2FJakarta",
 		config.Env("DB_USERNAME", "root"),
 		config.Env("DB_PASSWORD", ""),
 		config.Env("DB_HOST", "127.0.0.1"),
@@ -34,6 +34,8 @@ func Connect() {
 	if err != nil {
 		log.Fatal("Gagal koneksi ke database: ", err)
 	}
+
+	db.Exec("SET time_zone = '+07:00'")
 
 	DB = db
 	log.Println("Berhasil terhubung ke database MySQL!")
