@@ -131,6 +131,15 @@ func SetupAPI(r *gin.Engine) {
 		admin.PUT("/settings", apiControllers.AdminUpdateSettings)
 
 		admin.GET("/stats", apiControllers.AdminGetStats)
+		admin.GET("/stats/charts", apiControllers.AdminGetCharts)
+
+		admin.GET("/categories", apiControllers.AdminGetCategories)
+		admin.POST("/categories", apiControllers.AdminStoreCategory)
+		admin.PUT("/categories/:id", apiControllers.AdminUpdateCategory)
+		admin.DELETE("/categories/:id", apiControllers.AdminDeleteCategory)
+
+		admin.POST("/bots/bulk-assign-category", apiControllers.AdminBulkAssignCategory)
+		admin.POST("/bots/bulk-store", apiControllers.AdminBulkStoreBots)
 
 		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
 		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)

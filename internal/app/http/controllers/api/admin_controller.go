@@ -810,3 +810,358 @@ func AdminGetStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, stats)
 }
+
+// ───────────────────── Admin: Categories ─────────────────────
+
+type adminCategoryItem struct {
+	ID        uint      `json:"id"`
+	Name      string    `json:"name"`
+	Slug      string    `json:"slug"`
+	LogoUrl   *string   `json:"logo_url"`
+	Pinned    bool      `json:"pinned"`
+	Featured  bool      `json:"featured"`
+	BotCount  int64     `json:"bot_count"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func AdminGetCategories(c *gin.Context) {
+	var categories []models.Category
+	database.DB.Order("name asc").Find(&categories)
+
+	response := make([]adminCategoryItem, 0)
+	for _, cat := range categories {
+		var botCount int64
+		database.DB.Model(&models.Bot{}).Where("category_slug = ?", cat.Slug).Count(&botCount)
+
+		response = append(response, adminCategoryItem{
+			ID:        cat.ID,
+			Name:      cat.Name,
+			Slug:      cat.Slug,
+			LogoUrl:   cat.LogoUrl,
+			Pinned:    cat.Pinned,
+			Featured:  cat.Featured,
+			BotCount:  botCount,
+			CreatedAt: cat.CreatedAt,
+			UpdatedAt: cat.UpdatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func AdminStoreCategory(c *gin.Context) {
+	var req struct {
+		Name     string  `json:"name" form:"name"`
+		Slug     string  `json:"slug" form:"slug"`
+		LogoUrl  *string `json:"logo_url" form:"logo_url"`
+		Pinned   *bool   `json:"pinned" form:"pinned"`
+		Featured *bool   `json:"featured" form:"featured"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Format request tidak valid"})
+		return
+	}
+
+	if strings.TrimSpace(req.Name) == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Nama kategori wajib diisi."})
+		return
+	}
+
+	slug := strings.TrimSpace(req.Slug)
+	if slug == "" {
+		slug = strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+	}
+
+	pinned := false
+	if req.Pinned != nil {
+		pinned = *req.Pinned
+	}
+	featured := false
+	if req.Featured != nil {
+		featured = *req.Featured
+	}
+
+	if pinned && featured {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Pinned dan Featured tidak bisa aktif bersamaan."})
+		return
+	}
+
+	var count int64
+	database.DB.Model(&models.Category{}).Where("slug = ?", slug).Count(&count)
+	if count > 0 {
+		c.JSON(http.StatusConflict, gin.H{"message": "Slug sudah ada."})
+		return
+	}
+
+	cat := models.Category{
+		Name:     req.Name,
+		Slug:     slug,
+		LogoUrl:  req.LogoUrl,
+		Pinned:   pinned,
+		Featured: featured,
+	}
+	if err := database.DB.Create(&cat).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Gagal membuat kategori."})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Category created successfully", "category": cat})
+}
+
+func AdminUpdateCategory(c *gin.Context) {
+	id := c.Param("id")
+
+	var cat models.Category
+	if err := database.DB.First(&cat, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Kategori tidak ditemukan."})
+		return
+	}
+
+	var req struct {
+		Name     *string `json:"name" form:"name"`
+		Slug     *string `json:"slug" form:"slug"`
+		LogoUrl  *string `json:"logo_url" form:"logo_url"`
+		Pinned   *bool   `json:"pinned" form:"pinned"`
+		Featured *bool   `json:"featured" form:"featured"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Format request tidak valid"})
+		return
+	}
+
+	pinned := cat.Pinned
+	featured := cat.Featured
+	if req.Pinned != nil {
+		pinned = *req.Pinned
+	}
+	if req.Featured != nil {
+		featured = *req.Featured
+	}
+	if pinned && featured {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Pinned dan Featured tidak bisa aktif bersamaan."})
+		return
+	}
+
+	updates := map[string]interface{}{}
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Slug != nil {
+		slug := *req.Slug
+		if slug == "" {
+			slug = strings.ToLower(strings.ReplaceAll(cat.Name, " ", "-"))
+		}
+
+		var count int64
+		database.DB.Model(&models.Category{}).Where("slug = ? AND id != ?", slug, cat.ID).Count(&count)
+		if count > 0 {
+			c.JSON(http.StatusConflict, gin.H{"message": "Slug sudah digunakan kategori lain."})
+			return
+		}
+		updates["slug"] = slug
+	}
+	if req.LogoUrl != nil {
+		updates["logo_url"] = req.LogoUrl
+	}
+	if req.Pinned != nil {
+		updates["pinned"] = pinned
+	}
+	if req.Featured != nil {
+		updates["featured"] = featured
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Tidak ada field yang diupdate."})
+		return
+	}
+
+	database.DB.Model(&cat).Updates(updates)
+	c.JSON(http.StatusOK, gin.H{"message": "Category updated successfully"})
+}
+
+func AdminDeleteCategory(c *gin.Context) {
+	id := c.Param("id")
+
+	var cat models.Category
+	if err := database.DB.First(&cat, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Kategori tidak ditemukan."})
+		return
+	}
+
+	database.DB.Model(&models.Bot{}).Where("category_slug = ?", cat.Slug).Update("category_slug", nil)
+	database.DB.Delete(&cat)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Category deleted successfully"})
+}
+
+// ───────────────────── Admin: Bulk Assign Category ─────────────────────
+
+func AdminBulkAssignCategory(c *gin.Context) {
+	var req struct {
+		BotIDs       []string `json:"bot_ids" form:"bot_ids"`
+		CategorySlug string   `json:"category_slug" form:"category_slug"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Format request tidak valid"})
+		return
+	}
+
+	if len(req.BotIDs) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "bot_ids wajib diisi."})
+		return
+	}
+	if req.CategorySlug == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "category_slug wajib diisi."})
+		return
+	}
+
+	var cat models.Category
+	if err := database.DB.Where("slug = ?", req.CategorySlug).First(&cat).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "Kategori tidak ditemukan."})
+		return
+	}
+
+	result := database.DB.Model(&models.Bot{}).Where("bot_id IN ?", req.BotIDs).
+		Update("category_slug", req.CategorySlug)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("%d bots assigned to category", result.RowsAffected),
+		"updated": result.RowsAffected,
+	})
+}
+
+// ───────────────────── Admin: Bulk Store Bots ─────────────────────
+
+func AdminBulkStoreBots(c *gin.Context) {
+	var req struct {
+		Entries []botBulkEntry `json:"entries" form:"entries"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "Format request tidak valid"})
+		return
+	}
+
+	if len(req.Entries) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "entries wajib diisi."})
+		return
+	}
+
+	imported := 0
+	skipped := 0
+	for _, entry := range req.Entries {
+		botID := strings.TrimSpace(entry.BotID)
+		name := strings.TrimSpace(entry.Name)
+		if botID == "" || name == "" {
+			skipped++
+			continue
+		}
+
+		slug := strings.TrimSpace(entry.CategorySlug)
+		var birthday *time.Time
+		if entry.Birthday != "" {
+			t, err := time.Parse("2006-01-02", entry.Birthday)
+			if err == nil {
+				birthday = &t
+			}
+		}
+
+		bot := models.Bot{
+			BotID:        botID,
+			Name:         name,
+			CategorySlug: strPtrOrNil(slug),
+			Description:  entry.Description,
+			Avatar:       entry.Avatar,
+			Jailbreak:    entry.Jailbreak,
+			Personality:  entry.Personality,
+			ChatExamples: entry.ChatExamples,
+			Birthday:     birthday,
+			Sbr:          entry.Sbr,
+			Color:        entry.Color,
+			Child:        entry.Child != nil && *entry.Child,
+		}
+
+		if err := database.DB.Create(&bot).Error; err != nil {
+			skipped++
+			continue
+		}
+		imported++
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("%d bots imported successfully", imported),
+		"imported": imported,
+		"skipped":  skipped,
+	})
+}
+
+type botBulkEntry struct {
+	BotID        string  `json:"bot_id"`
+	Name         string  `json:"name"`
+	CategorySlug string  `json:"category_slug"`
+	Description  *string `json:"description"`
+	Avatar       *string `json:"avatar"`
+	Jailbreak    *string `json:"background"`
+	Personality  *string `json:"personality"`
+	ChatExamples *string `json:"chat_examples"`
+	Birthday     string  `json:"birthday"`
+	Sbr          *string `json:"sbr"`
+	Color        *string `json:"color"`
+	Child        *bool   `json:"child"`
+}
+
+func strPtrOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// ───────────────────── Admin: Charts ─────────────────────
+
+type adminChartsResponse struct {
+	Hourly  []chartDataPoint `json:"hourly"`
+	Daily   []chartDataPoint `json:"daily"`
+	Weekly  []chartDataPoint `json:"weekly"`
+	Monthly []chartDataPoint `json:"monthly"`
+}
+
+type chartDataPoint struct {
+	Label string `json:"label"`
+	Value int64  `json:"value"`
+}
+
+func AdminGetCharts(c *gin.Context) {
+	now := time.Now()
+	var resp adminChartsResponse
+
+	resp.Hourly = getChartData("hour", now.Add(-24*time.Hour), now, "yyyy-MM-dd HH:00")
+	resp.Daily = getChartData("day", now.AddDate(0, 0, -7), now, "yyyy-MM-dd")
+	resp.Weekly = getChartData("week", now.AddDate(0, 0, -28), now, "yyyy-ww")
+	resp.Monthly = getChartData("month", now.AddDate(0, -12, 0), now, "yyyy-MM")
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func getChartData(dateFmt string, since, until time.Time, labelFmt string) []chartDataPoint {
+	rows, err := database.DB.Raw(`
+		SELECT DATE_FORMAT(created_at, '`+labelFmt+`') AS label,
+		       COUNT(DISTINCT user_id) AS value
+		FROM user_activities
+		WHERE created_at >= ? AND created_at <= ?
+		GROUP BY label
+		ORDER BY label ASC
+	`, since, until).Rows()
+	if err != nil {
+		return make([]chartDataPoint, 0)
+	}
+	defer rows.Close()
+
+	result := make([]chartDataPoint, 0)
+	for rows.Next() {
+		var dp chartDataPoint
+		rows.Scan(&dp.Label, &dp.Value)
+		result = append(result, dp)
+	}
+	return result
+}
