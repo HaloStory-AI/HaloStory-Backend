@@ -72,24 +72,28 @@ var ProviderEnvKeys = map[string]string{
 }
 
 type SystemAIChatParams struct {
-	Messages         []map[string]string
-	BotID            string
-	UserID           uint
-	Language         string
-	Temperature      float64
-	MaxTokens        int
-	TopP             float64
-	TopK             int
-	ResponseLength   int
-	Stop             []string
-	Summary          string
-	IsSummarize      bool
-	HistoryDepth     int
-	IsGroup          bool
-	IsDisableBond    bool
-	UserPersona      string
-	BotIDs           []string
-	ExistingMemories []string
+	Messages          []map[string]string
+	BotID             string
+	UserID            uint
+	Language          string
+	Temperature       float64
+	MaxTokens         int
+	TopP              float64
+	TopK              int
+	ResponseLength    int
+	Stop              []string
+	Summary           string
+	IsSummarize       bool
+	HistoryDepth      int
+	IsGroup           bool
+	IsDisableBond     bool
+	UserPersona       string
+	BotIDs            []string
+	ExistingMemories  []string
+	PresencePenalty   float64
+	FrequencyPenalty  float64
+	MinP              float64
+	RepetitionPenalty float64
 }
 
 type PingLog struct {

@@ -117,23 +117,45 @@ func main() {
 			if isSystemAIJob(data) {
 				sysSem <- struct{}{}
 				go func(d []byte) {
+					var jobUUID string
 					defer func() {
 						if r := recover(); r != nil {
 							log.Printf("Worker: RECOVERED panic in sys goroutine: %v", r)
+							if jobUUID != "" {
+								markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
+							}
 						}
 						<-sysSem
 					}()
+					// Pre-extract uuid for panic recovery
+					var rawPayload map[string]interface{}
+					if json.Unmarshal(d, &rawPayload) == nil {
+						if u, ok := rawPayload["uuid"].(string); ok {
+							jobUUID = u
+						}
+					}
 					processJob(d)
 				}(data)
 			} else {
 				mainSem <- struct{}{}
 				go func(d []byte) {
+					var jobUUID string
 					defer func() {
 						if r := recover(); r != nil {
 							log.Printf("Worker: RECOVERED panic in main goroutine: %v", r)
+							if jobUUID != "" {
+								markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
+							}
 						}
 						<-mainSem
 					}()
+					// Pre-extract uuid for panic recovery
+					var rawPayload map[string]interface{}
+					if json.Unmarshal(d, &rawPayload) == nil {
+						if u, ok := rawPayload["uuid"].(string); ok {
+							jobUUID = u
+						}
+					}
 					processJob(d)
 				}(data)
 			}
@@ -246,6 +268,25 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 	var userPersona *string
 	if data.UserPersona != "" {
 		userPersona = &data.UserPersona
+	}
+
+	// WithoutOverlapping lock
+	if userID > 0 {
+		lockKey := fmt.Sprintf("ai-chat-lock:%d:%s", userID, botID)
+		if data.IsGroup {
+			lockKey = fmt.Sprintf("ai-chat-lock:%d:group", userID)
+		}
+		locked, err := services.RedisClient.SetNX(services.RedisCtx, lockKey, "1", 120*time.Second).Result()
+		if err != nil {
+			log.Printf("Worker: Lock check failed for %s: %v", uuid, err)
+		}
+		if err == nil && !locked {
+			log.Printf("Worker: Job %s skipped — overlapping lock held for %s", uuid, lockKey)
+			return
+		}
+		if err == nil && locked {
+			defer services.RedisClient.Del(services.RedisCtx, lockKey)
+		}
 	}
 
 	if data.IsSummarize {
@@ -399,7 +440,7 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 	geminiResp, statusCode, err := byok.CallGemini(decryptedKey, data.Model, req)
 	if err != nil {
 		log.Printf("Worker: Gemini API error for %s: %v (status %d)", uuid, err, statusCode)
-		markError(uuid, storeKey, "Gemini API error: "+err.Error(), statusCode)
+		markError(uuid, storeKey, "[GoogleAI] response failed: "+err.Error(), statusCode)
 		return
 	}
 
@@ -413,7 +454,12 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 			openaiResp := byok.ConvertToOpenAIFormat(geminiResp, data.Model)
 			openaiResp.Choices[0].Message.Content = "I'm sorry, tapi prompt ini diblokir oleh sensor Google... (" + blocked + ")"
 			openaiResp.Choices[0].FinishReason = "content_filter"
-			markCompleted(uuid, storeKey, openaiResp, 400)
+			// Match Laravel's blocked response structure: error + choices
+			respBytes, _ := json.Marshal(openaiResp)
+			var respMap map[string]interface{}
+			json.Unmarshal(respBytes, &respMap)
+			respMap["error"] = "[GoogleAI] Prompt was blocked: " + blocked
+			markCompleted(uuid, storeKey, respMap, 400)
 			return
 		}
 	}
@@ -448,42 +494,34 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 			byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
 		}
 
-		if !data.IsGroup && !data.IsDisableBond {
+		// Convert to map for bond field injection
+		respBytes, _ := json.Marshal(openaiResp)
+		var respMap map[string]interface{}
+		json.Unmarshal(respBytes, &respMap)
+
+		if !data.IsGroup && !data.IsDisableBond && data.BotID != "" {
 			bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
-
-			openaiRespRaw := make(map[string]interface{})
-			jsonBytes, _ := json.Marshal(openaiResp)
-			json.Unmarshal(jsonBytes, &openaiRespRaw)
-			openaiRespRaw["bond_event"] = bondResult.BondEvent
-			openaiRespRaw["bond_status"] = bondResult.BondStatus
-			openaiRespRaw["relationship_label"] = bondResult.RelationshipLabel
-			openaiRespRaw["bond_level"] = bondResult.BondLevel
-
-			resultJSON, _ := json.Marshal(openaiRespRaw)
-			services.StoreChatResult(uuid, resultJSON, 10*time.Minute)
-
-			finalPayload := map[string]interface{}{
-				"status":      "completed",
-				"response":    openaiRespRaw,
-				"status_code": 200,
-			}
-			finalJSON, _ := json.Marshal(finalPayload)
-			services.StoreChatResult(uuid, finalJSON, 10*time.Minute)
-			return
+			respMap["bond_event"] = bondResult.BondEvent
+			respMap["bond_status"] = bondResult.BondStatus
+			respMap["relationship_label"] = bondResult.RelationshipLabel
+			respMap["bond_level"] = bondResult.BondLevel
+		} else {
+			respMap["bond_event"] = nil
+			respMap["bond_status"] = nil
+			respMap["relationship_label"] = nil
+			respMap["bond_level"] = nil
 		}
+
+		markCompleted(uuid, storeKey, respMap, 200)
+		return
 	}
 
 	markCompleted(uuid, storeKey, openaiResp, 200)
 }
 
 func markCompleted(uuid, storeKey string, response interface{}, statusCode int) {
-	payload := map[string]interface{}{
-		"status":      "completed",
-		"response":    response,
-		"status_code": statusCode,
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
+	respJSON, _ := json.Marshal(response)
+	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Completed job %s with status %d", uuid, statusCode)
 }
 
@@ -846,17 +884,8 @@ func markSummaryCompleted(uuid, storeKey, summary string, memories []string, sta
 		"summary":              summary,
 		"memory_worth_keeping": memories,
 	}
-	payload := map[string]interface{}{
-		"status":      "completed",
-		"response":    response,
-		"status_code": statusCode,
-	}
-	if isError {
-		payload["error"] = true
-		payload["error_status_code"] = statusCode
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
+	respJSON, _ := json.Marshal(response)
+	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Completed summarization job %s with status %d", uuid, statusCode)
 }
 
@@ -928,6 +957,25 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 	var userPersona *string
 	if data.UserPersona != "" {
 		userPersona = &data.UserPersona
+	}
+
+	// WithoutOverlapping lock
+	if userID > 0 {
+		lockKey := fmt.Sprintf("ai-chat-lock:%d:%s", userID, botID)
+		if data.IsGroup {
+			lockKey = fmt.Sprintf("ai-chat-lock:%d:group", userID)
+		}
+		locked, err := services.RedisClient.SetNX(services.RedisCtx, lockKey, "1", 120*time.Second).Result()
+		if err != nil {
+			log.Printf("Worker: Lock check failed for %s: %v", uuid, err)
+		}
+		if err == nil && !locked {
+			log.Printf("Worker: Job %s skipped — overlapping lock held for %s", uuid, lockKey)
+			return
+		}
+		if err == nil && locked {
+			defer services.RedisClient.Del(services.RedisCtx, lockKey)
+		}
 	}
 
 	shouldInject := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
@@ -1064,29 +1112,26 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 			byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
 		}
 
-		if !data.IsGroup && !data.IsDisableBond {
+		// Convert to map for bond field injection
+		respBytes, _ := json.Marshal(openaiResp)
+		var respMap map[string]interface{}
+		json.Unmarshal(respBytes, &respMap)
+
+		if !data.IsGroup && !data.IsDisableBond && data.BotID != "" {
 			bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
-
-			openaiRespRaw := make(map[string]interface{})
-			jsonBytes, _ := json.Marshal(openaiResp)
-			json.Unmarshal(jsonBytes, &openaiRespRaw)
-			openaiRespRaw["bond_event"] = bondResult.BondEvent
-			openaiRespRaw["bond_status"] = bondResult.BondStatus
-			openaiRespRaw["relationship_label"] = bondResult.RelationshipLabel
-			openaiRespRaw["bond_level"] = bondResult.BondLevel
-
-			resultJSON, _ := json.Marshal(openaiRespRaw)
-			services.StoreChatResult(uuid, resultJSON, 10*time.Minute)
-
-			finalPayload := map[string]interface{}{
-				"status":      "completed",
-				"response":    openaiRespRaw,
-				"status_code": 200,
-			}
-			finalJSON, _ := json.Marshal(finalPayload)
-			services.StoreChatResult(uuid, finalJSON, 10*time.Minute)
-			return
+			respMap["bond_event"] = bondResult.BondEvent
+			respMap["bond_status"] = bondResult.BondStatus
+			respMap["relationship_label"] = bondResult.RelationshipLabel
+			respMap["bond_level"] = bondResult.BondLevel
+		} else {
+			respMap["bond_event"] = nil
+			respMap["bond_status"] = nil
+			respMap["relationship_label"] = nil
+			respMap["bond_level"] = nil
 		}
+
+		markCompleted(uuid, storeKey, respMap, 200)
+		return
 	}
 
 	markCompleted(uuid, storeKey, openaiResp, 200)
@@ -1206,6 +1251,25 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 	var userPersona *string
 	if data.UserPersona != "" {
 		userPersona = &data.UserPersona
+	}
+
+	// WithoutOverlapping lock
+	if userID > 0 {
+		lockKey := fmt.Sprintf("ai-chat-lock:%d:%s", userID, botID)
+		if data.IsGroup {
+			lockKey = fmt.Sprintf("ai-chat-lock:%d:group", userID)
+		}
+		locked, err := services.RedisClient.SetNX(services.RedisCtx, lockKey, "1", 120*time.Second).Result()
+		if err != nil {
+			log.Printf("Worker: Lock check failed for %s: %v", uuid, err)
+		}
+		if err == nil && !locked {
+			log.Printf("Worker: Job %s skipped — overlapping lock held for %s", uuid, lockKey)
+			return
+		}
+		if err == nil && locked {
+			defer services.RedisClient.Del(services.RedisCtx, lockKey)
+		}
 	}
 
 	if data.IsSummarize {
@@ -1420,24 +1484,9 @@ func providerDefaultBaseURL(provider string) string {
 }
 
 func markError(uuid, storeKey, message string, statusCode int) {
-	payload := map[string]interface{}{
-		"status":      "completed",
-		"status_code": statusCode,
-		"response": map[string]interface{}{
-			"error":   message,
-			"choices": []map[string]interface{}{
-				{
-					"index": 0,
-					"message": map[string]string{
-						"role":    "assistant",
-						"content": "An error occurred while processing your request.",
-					},
-					"finish_reason": "error",
-				},
-			},
-		},
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
+	respJSON, _ := json.Marshal(map[string]interface{}{
+		"error": message,
+	})
+	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Error job %s: %s (status %d)", uuid, message, statusCode)
 }

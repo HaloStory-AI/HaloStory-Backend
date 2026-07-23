@@ -113,6 +113,12 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 	if req.TopK != nil {
 		payload["top_k"] = *req.TopK
 	}
+	if req.ResponseLength != nil {
+		payload["response_length"] = *req.ResponseLength
+	}
+	if req.BaseURL != nil {
+		payload["base_url"] = *req.BaseURL
+	}
 	if len(req.Stop) > 0 {
 		payload["stop"] = req.Stop
 	}

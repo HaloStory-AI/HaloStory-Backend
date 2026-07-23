@@ -25,6 +25,7 @@ type ClaudeChatRequest struct {
 	TopK             *int                    `json:"top_k,omitempty"`
 	Stop             []string                `json:"stop,omitempty"`
 	Reasoning        *byokSvc.ReasoningConfig `json:"reasoning,omitempty"`
+	ResponseLength   *int                    `json:"response_length,omitempty"`
 	Summary          *string                 `json:"summary,omitempty"`
 	IsSummarize      *bool                   `json:"is_summarize,omitempty"`
 	ExistingMemories []string                `json:"existing_memories,omitempty"`
@@ -68,6 +69,7 @@ func ClaudeChat(c *gin.Context) {
 		MaxTokens:        req.MaxTokens,
 		Stop:             req.Stop,
 		Reasoning:        req.Reasoning,
+		ResponseLength:   req.ResponseLength,
 		Summary:          req.Summary,
 		IsSummarize:      req.IsSummarize,
 		Language:         req.Language,
@@ -78,6 +80,7 @@ func ClaudeChat(c *gin.Context) {
 		BotIDs:           req.BotIDs,
 		ExistingMemories: req.ExistingMemories,
 		BotID:            req.BotID,
+		SourceIP:         c.ClientIP(),
 	}); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error":   "Input validation failed",
@@ -128,6 +131,9 @@ func ClaudeChat(c *gin.Context) {
 	}
 	if req.TopK != nil {
 		payload["top_k"] = *req.TopK
+	}
+	if req.ResponseLength != nil {
+		payload["response_length"] = *req.ResponseLength
 	}
 	if len(req.Stop) > 0 {
 		payload["stop"] = req.Stop

@@ -229,6 +229,7 @@ func HandleChildSafety(bot *models.Bot, user *models.User, userInput, aiResponse
 		return
 	}
 	sendChildSafetyToDiscord(bot, user, userInput, aiResponse, status)
+	sendChildSafetyToTelegram(bot, user, userInput, aiResponse, status)
 }
 
 func sendChildSafetyToDiscord(bot *models.Bot, user *models.User, userInput, aiResponse, status string) {
@@ -273,6 +274,52 @@ func sendChildSafetyToDiscord(bot *models.Bot, user *models.User, userInput, aiR
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to send Discord Child Safety Alert: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+func sendChildSafetyToTelegram(bot *models.Bot, user *models.User, userInput, aiResponse, status string) {
+	botToken := config.Env("TELEGRAM_BOT_TOKEN", "")
+	chatID := config.Env("TELEGRAM_USER_ID", "")
+	if botToken == "" || chatID == "" {
+		return
+	}
+
+	truncatedResponse := aiResponse
+	if len(aiResponse) > 256 {
+		truncatedResponse = aiResponse[:256] + "..."
+	}
+	inputText := userInput
+	if inputText == "" {
+		inputText = "(No Input)"
+	}
+
+	text := fmt.Sprintf(
+		"<b>Child Safety Alert</b>\n\n<b>Status:</b> %s\n<b>User:</b> %s\n<b>Input:</b> %s\n<b>Character:</b> %s\n<b>Response:</b> %s",
+		status,
+		user.Name,
+		inputText,
+		bot.Name,
+		truncatedResponse,
+	)
+
+	payload := map[string]interface{}{
+		"chat_id":                  chatID,
+		"text":                     text,
+		"parse_mode":               "HTML",
+		"disable_web_page_preview": true,
+	}
+
+	body, _ := json.Marshal(payload)
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to send Telegram Child Safety Alert: %v", err)
 		return
 	}
 	defer resp.Body.Close()

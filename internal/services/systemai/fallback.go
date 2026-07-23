@@ -215,13 +215,34 @@ func buildOpenAIRequest(messages []byok.Message, model string, params *SystemAIC
 		maxOut = params.MaxTokens
 	}
 
+	presPenalty := params.PresencePenalty
+	if presPenalty == 0 {
+		presPenalty = 0.5
+	}
+	freqPenalty := params.FrequencyPenalty
+	if freqPenalty == 0 {
+		freqPenalty = 0.2
+	}
+	minP := params.MinP
+	if minP == 0 {
+		minP = 0.03
+	}
+	repPenalty := params.RepetitionPenalty
+	if repPenalty == 0 {
+		repPenalty = 1.10
+	}
+
 	return byok.OpenAICompatRequest{
-		Model:       model,
-		Messages:    openaiMessages,
-		Temperature: &temp,
-		MaxTokens:   &maxOut,
-		TopP:        &topP,
-		Stop:        params.Stop,
+		Model:            model,
+		Messages:         openaiMessages,
+		Temperature:      &temp,
+		MaxTokens:        &maxOut,
+		TopP:             &topP,
+		PresencePenalty:  &presPenalty,
+		FrequencyPenalty: &freqPenalty,
+		MinP:             &minP,
+		RepetitionPenalty: &repPenalty,
+		Stop:             params.Stop,
 	}
 }
 

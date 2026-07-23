@@ -23,6 +23,7 @@ type SystemChatRequest struct {
 	MaxTokens        *int                     `json:"max_tokens,omitempty"`
 	TopP             *float64                 `json:"top_p,omitempty"`
 	TopK             *int                     `json:"top_k,omitempty"`
+	ResponseLength   *int                     `json:"response_length,omitempty"`
 	Summary          *string                  `json:"summary,omitempty"`
 	HistoryDepth     *int                     `json:"history_depth,omitempty"`
 	IsGroup          *bool                    `json:"is_group,omitempty"`
@@ -106,6 +107,9 @@ func SystemChat(c *gin.Context) {
 	}
 	if req.TopK != nil {
 		payload["top_k"] = *req.TopK
+	}
+	if req.ResponseLength != nil {
+		payload["response_length"] = *req.ResponseLength
 	}
 	if req.Summary != nil {
 		payload["summary"] = *req.Summary

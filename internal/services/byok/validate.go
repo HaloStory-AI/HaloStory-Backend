@@ -2,6 +2,7 @@
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -36,6 +37,10 @@ type BYOKRequest struct {
 	UserPersona      *string          `json:"user_persona,omitempty"`
 	BotIDs           []string         `json:"bot_ids,omitempty"`
 	ExistingMemories []string         `json:"existing_memories,omitempty"`
+	TopA             *float64         `json:"top_a,omitempty"`
+	MinP             *float64         `json:"min_p,omitempty"`
+	RepetitionPenalty *float64        `json:"repetition_penalty,omitempty"`
+	SourceIP         string           `json:"-"`
 }
 
 type Message struct {
@@ -60,54 +65,118 @@ const (
 )
 
 func SanitizeByokInput(req *BYOKRequest) *ValidationError {
+	if len(req.Messages) == 0 {
+		err := &ValidationError{Message: "messages must be an array with at least one message"}
+		logValidationFailure(req, err)
+		return err
+	}
+
+	// Message structural checks: content must be a non-empty string, roles must be valid
+	for i, msg := range req.Messages {
+		idxStr := strconv.Itoa(i)
+		if msg.Role == "" || msg.Content == "" {
+			err := &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' and 'content' fields"}
+			logValidationFailure(req, err)
+			return err
+		}
+		allowedRoles := map[string]bool{"user": true, "assistant": true, "system": true}
+		if !allowedRoles[msg.Role] {
+			err := &ValidationError{Message: "messages[" + idxStr + "].role must be one of: user, assistant, system"}
+			logValidationFailure(req, err)
+			return err
+		}
+		if controlChars.MatchString(msg.Content) {
+			err := &ValidationError{Message: "messages[" + idxStr + "].content contains invalid control characters"}
+			logValidationFailure(req, err)
+			return err
+		}
+	}
+
 	if len(req.APIKey) > maxAPIKeyLength {
-		return &ValidationError{Message: "api_key field exceeds maximum allowed length"}
+		err := &ValidationError{Message: "api_key field exceeds maximum allowed length"}
+		logValidationFailure(req, err)
+		return err
 	}
 
 	if len(req.Model) > maxModelLength {
-		return &ValidationError{Message: "model field exceeds maximum allowed length"}
+		err := &ValidationError{Message: "model field exceeds maximum allowed length"}
+		logValidationFailure(req, err)
+		return err
 	}
 	if controlChars.MatchString(req.Model) {
-		return &ValidationError{Message: "model field contains invalid control characters"}
+		err := &ValidationError{Message: "model field contains invalid control characters"}
+		logValidationFailure(req, err)
+		return err
 	}
 
 	if req.BaseURL != nil && *req.BaseURL != "" {
 		if len(*req.BaseURL) > maxBaseURLLength {
-			return &ValidationError{Message: "base_url exceeds maximum allowed length"}
+			err := &ValidationError{Message: "base_url exceeds maximum allowed length"}
+			logValidationFailure(req, err)
+			return err
 		}
 		parsed, err := url.ParseRequestURI(*req.BaseURL)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return &ValidationError{Message: "base_url is not a valid URL"}
+			err := &ValidationError{Message: "base_url is not a valid URL"}
+			logValidationFailure(req, err)
+			return err
 		}
 		if parsed.Scheme != "https" {
-			return &ValidationError{Message: "base_url must use HTTPS"}
+			err := &ValidationError{Message: "base_url must use HTTPS"}
+			logValidationFailure(req, err)
+			return err
 		}
 	}
 
 	numericChecks := map[string][2]float64{
-		"temperature":       {0.0, 2.0},
-		"top_p":             {0.0, 1.0},
-		"frequency_penalty": {-2.0, 2.0},
-		"presence_penalty":  {-2.0, 2.0},
+		"temperature":        {0.0, 2.0},
+		"top_p":              {0.0, 1.0},
+		"top_a":              {0.0, 1.0},
+		"min_p":              {0.0, 1.0},
+		"repetition_penalty": {0.0, 2.0},
+		"frequency_penalty":  {-2.0, 2.0},
+		"presence_penalty":   {-2.0, 2.0},
 	}
 
 	if req.Temperature != nil {
 		if err := checkNumeric("temperature", *req.Temperature, numericChecks["temperature"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.TopP != nil {
 		if err := checkNumeric("top_p", *req.TopP, numericChecks["top_p"]); err != nil {
+			logValidationFailure(req, err)
+			return err
+		}
+	}
+	if req.TopA != nil {
+		if err := checkNumeric("top_a", *req.TopA, numericChecks["top_a"]); err != nil {
+			logValidationFailure(req, err)
+			return err
+		}
+	}
+	if req.MinP != nil {
+		if err := checkNumeric("min_p", *req.MinP, numericChecks["min_p"]); err != nil {
+			logValidationFailure(req, err)
+			return err
+		}
+	}
+	if req.RepetitionPenalty != nil {
+		if err := checkNumeric("repetition_penalty", *req.RepetitionPenalty, numericChecks["repetition_penalty"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.FrequencyPenalty != nil {
 		if err := checkNumeric("frequency_penalty", *req.FrequencyPenalty, numericChecks["frequency_penalty"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.PresencePenalty != nil {
 		if err := checkNumeric("presence_penalty", *req.PresencePenalty, numericChecks["presence_penalty"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
@@ -121,40 +190,42 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 
 	if req.MaxTokens != nil {
 		if err := checkInt("max_tokens", *req.MaxTokens, intChecks["max_tokens"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.ResponseLength != nil {
 		if err := checkInt("response_length", *req.ResponseLength, intChecks["response_length"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.TopK != nil {
 		if err := checkInt("top_k", *req.TopK, intChecks["top_k"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 	if req.HistoryDepth != nil {
 		if err := checkInt("history_depth", *req.HistoryDepth, intChecks["history_depth"]); err != nil {
+			logValidationFailure(req, err)
 			return err
 		}
 	}
 
-	for i, msg := range req.Messages {
-		idxStr := strconv.Itoa(i)
-		if msg.Role == "" || msg.Content == "" {
-			return &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' and 'content' fields"}
-		}
-		allowedRoles := map[string]bool{"user": true, "assistant": true, "system": true}
-		if !allowedRoles[msg.Role] {
-			return &ValidationError{Message: "messages[" + idxStr + "].role must be one of: user, assistant, system"}
-		}
-		if controlChars.MatchString(msg.Content) {
-			return &ValidationError{Message: "messages[" + idxStr + "].content contains invalid control characters"}
-		}
-	}
-
 	return nil
+}
+
+func logValidationFailure(req *BYOKRequest, err *ValidationError) {
+	ip := req.SourceIP
+	if ip == "" {
+		ip = "unknown"
+	}
+	model := req.Model
+	if model == "" {
+		model = "unknown"
+	}
+	log.Printf("[BYOK Validation Failed] IP: %s | Model: %s | Error: %s", ip, model, err.Message)
 }
 
 func checkNumeric(field string, val float64, bounds [2]float64) *ValidationError {

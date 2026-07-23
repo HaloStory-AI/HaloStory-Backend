@@ -44,12 +44,11 @@ func ForgotPassword(c *gin.Context) {
 	}
 
 	var req struct {
-		Email string `json:"email" form:"email"`
+		Email string `json:"email" form:"email" binding:"required,email,max=255"`
 	}
-	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "The email field is required.",
-		})
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
@@ -67,38 +66,25 @@ func ForgotPassword(c *gin.Context) {
 
 func ResetPassword(c *gin.Context) {
 	var req struct {
-		Email           string `json:"email" form:"email"`
-		Otp             string `json:"otp" form:"otp"`
-		Password        string `json:"password" form:"password"`
+		Email           string `json:"email" form:"email" binding:"required,email,max=255"`
+		Otp             string `json:"otp" form:"otp" binding:"required,len=6"`
+		Password        string `json:"password" form:"password" binding:"required,min=8"`
 		PasswordConfirm string `json:"password_confirmation" form:"password_confirmation"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Format request tidak valid",
-		})
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
-	req.Email = strings.TrimSpace(req.Email)
 	req.Otp = strings.TrimSpace(req.Otp)
 
-	if req.Email == "" || len(req.Otp) != 6 || req.Password == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Email, OTP (6 digit), dan password wajib diisi.",
-		})
-		return
-	}
-
-	if len(req.Password) < 8 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Password minimal 8 karakter.",
-		})
-		return
-	}
-
 	if req.Password != req.PasswordConfirm {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Password confirmation tidak cocok.",
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The password confirmation does not match.",
+			"errors": gin.H{
+				"password": []string{"The password confirmation does not match."},
+			},
 		})
 		return
 	}
@@ -318,16 +304,24 @@ func UpdatePersona(c *gin.Context) {
 
 func ReportBannedDevice(c *gin.Context) {
 	var req struct {
-		DeviceID    string  `json:"device_id" form:"device_id"`
-		DeviceModel *string `json:"device_model" form:"device_model"`
-		DeviceBrand *string `json:"device_brand" form:"device_brand"`
-		OsVersion   *string `json:"os_version" form:"os_version"`
-		Platform    *string `json:"platform" form:"platform"`
-		AppVersion  *string `json:"app_version" form:"app_version"`
+		DeviceID    string  `json:"device_id" form:"device_id" binding:"required,max=500"`
+		DeviceModel *string `json:"device_model" form:"device_model" binding:"omitempty,max=255"`
+		DeviceBrand *string `json:"device_brand" form:"device_brand" binding:"omitempty,max=255"`
+		OsVersion   *string `json:"os_version" form:"os_version" binding:"omitempty,max=100"`
+		Platform    *string `json:"platform" form:"platform" binding:"omitempty,max=50"`
+		AppVersion  *string `json:"app_version" form:"app_version" binding:"omitempty,max=50"`
 	}
-	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.DeviceID) == "" {
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
+		return
+	}
+	if strings.TrimSpace(req.DeviceID) == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Device ID wajib diisi.",
+			"message": "The device id field is required.",
+			"errors": gin.H{
+				"device_id": []string{"The device id field is required."},
+			},
 		})
 		return
 	}
