@@ -72,26 +72,28 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
 	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
 
+	// Stories & Calendar Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/stories", apiControllers.GetByBondedBots)
+	protected.POST("/v1/calendar", apiControllers.CalendarIndex)
+
+	// Categories, Bot Tab & Recruited Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/categories", apiControllers.CategoryIndex)
+	protected.GET("/v1/category/:slug", apiControllers.CategoryBots)
+	protected.GET("/v1/bot-tab", apiControllers.BotTabIndex)
+
+	// Bot Bio & Recruited Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
+	protected.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
+
+	// Student Request Routes (no email verification required — same as Laravel)
+	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
+	protected.POST("/student-requests", apiControllers.StudentRequestStore)
+
 	// Verified-only routes (require email verification)
 	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
 	{
-		// Categories Routes
-		verified.GET("/v1/categories", apiControllers.CategoryIndex)
-		verified.GET("/v1/category/:slug", apiControllers.CategoryBots)
-
-		// Bot & Bond Routes
+		// Bot Routes
 		verified.GET("/bots", apiControllers.BotIndex)
-		verified.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
-		verified.GET("/v1/bot-tab", apiControllers.BotTabIndex)
-		verified.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
-		verified.GET("/v1/stories", apiControllers.GetByBondedBots)
-
-		// Calendar Routes
-		verified.POST("/v1/calendar", apiControllers.CalendarIndex)
-
-		// Student Request Routes
-		verified.GET("/student-requests", apiControllers.StudentRequestIndex)
-		verified.POST("/student-requests", apiControllers.StudentRequestStore)
 
 		// ─── System AI Chat (server-side keys) ───
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)

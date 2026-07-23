@@ -74,11 +74,11 @@ func StudentRequestIndex(c *gin.Context) {
 }
 
 type storeStudentRequestInput struct {
-	StudentName string `json:"student_name" form:"student_name"`
+	StudentName string `json:"student_name" form:"student_name" binding:"required,max=100"`
 }
 
 func StudentRequestStore(c *gin.Context) {
-	if config.Env("STUDENT_REQUESTS_OPEN", "") != "true" {
+	if config.Env("STUDENT_REQUESTS_OPEN", "true") != "true" {
 		c.JSON(http.StatusForbidden, studentRequestStoreResponse{
 			Success: false,
 			Message: "Student requests are currently closed.",
@@ -89,30 +89,25 @@ func StudentRequestStore(c *gin.Context) {
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)
 
+	var input storeStudentRequestInput
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The student name field is required and must not exceed 100 characters.",
+			"errors": gin.H{
+				"student_name": []string{"The student name field is required and must not exceed 100 characters."},
+			},
+		})
+		return
+	}
+
+	input.StudentName = strings.TrimSpace(input.StudentName)
+
 	allowed, retryAfter, err := services.RateLimit("student-request:user:"+fmt.Sprint(user.ID), 5, 12*time.Hour)
 	if err == nil && !allowed {
 		hours := int64(math.Ceil(float64(retryAfter) / 3600))
 		c.JSON(http.StatusTooManyRequests, studentRequestStoreResponse{
 			Success: false,
 			Message: fmt.Sprintf("Kamu sudah mencapai batas maksimal 5 request. Silakan coba lagi dalam %d jam.", hours),
-		})
-		return
-	}
-
-	var input storeStudentRequestInput
-	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
-			"message": "Validation failed.",
-		})
-		return
-	}
-
-	input.StudentName = strings.TrimSpace(input.StudentName)
-	if input.StudentName == "" || len(input.StudentName) > 255 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
-			"message": "The student name field is required and must not exceed 255 characters.",
 		})
 		return
 	}

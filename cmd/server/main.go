@@ -32,6 +32,9 @@ func main() {
 	// Koneksi ke Redis
 	services.InitRedis()
 
+	// Set Gin mode (default release — set GIN_MODE=debug di .env untuk dev)
+	gin.SetMode(config.Env("GIN_MODE", "release"))
+
 	// Inisialisasi instance Gin baru dengan middleware global
 	r := gin.New()
 	r.Use(gin.Logger())
