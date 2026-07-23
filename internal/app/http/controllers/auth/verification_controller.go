@@ -45,7 +45,7 @@ func SendOtp(email string) {
 }
 
 type VerifyOtpRequest struct {
-	Otp string `json:"otp" form:"otp"`
+	Otp string `json:"otp" form:"otp" binding:"required,len=6"`
 }
 
 // SendVerificationOtp untuk diakses via endpoint (minta ulang OTP)
@@ -70,10 +70,9 @@ func SendVerificationOtp(c *gin.Context) {
 // VerifyEmail untuk memvalidasi OTP yang dimasukkan
 func VerifyEmail(c *gin.Context) {
 	var req VerifyOtpRequest
-	if err := c.ShouldBind(&req); err != nil || len(req.Otp) != 6 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Input tidak valid. OTP harus 6 digit.",
-		})
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 

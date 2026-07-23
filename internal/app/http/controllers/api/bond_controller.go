@@ -12,13 +12,18 @@ import (
 )
 
 type RecruitRequest struct {
-	BotID string `json:"bot_id" form:"bot_id"`
+	BotID string `json:"bot_id" form:"bot_id" binding:"required"`
 }
 
 func BondRecruit(c *gin.Context) {
 	var req RecruitRequest
-	if err := c.ShouldBind(&req); err != nil || req.BotID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bot_id is required"})
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The bot_id field is required.",
+			"errors": gin.H{
+				"bot_id": []string{"The bot_id field is required."},
+			},
+		})
 		return
 	}
 

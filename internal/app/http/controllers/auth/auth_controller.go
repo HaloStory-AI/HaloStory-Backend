@@ -119,6 +119,10 @@ func formatValidationErrors(err error) (int, gin.H) {
 			"OsVersion":            "os_version",
 			"Platform":             "platform",
 			"AppVersion":           "app_version",
+			"CurrentPassword":      "current_password",
+			"NewPassword":          "new_password",
+			"NewPasswordConfirm":   "new_password_confirmation",
+			"Persona":              "persona",
 		}
 
 		errs := make(map[string][]string)

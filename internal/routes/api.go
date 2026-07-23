@@ -56,6 +56,22 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/email/send-verification-otp", auth.SendVerificationOtp)
 	protected.POST("/email/verify", auth.VerifyEmail)
 
+	// Backup Routes (no email verification required — same as Laravel)
+	protected.POST("/user/backup", apiControllers.BackupStore)
+	protected.GET("/user/restore", apiControllers.BackupRestore)
+
+	// User Profile Routes (no email verification required — same as Laravel)
+	protected.POST("/user/update-email", auth.UpdateEmail)
+	protected.POST("/user/update-name", auth.UpdateName)
+	protected.POST("/user/update-password", auth.UpdatePassword)
+	protected.POST("/user/update-persona", auth.UpdatePersona)
+
+	// Bond Routes (no email verification required — same as Laravel)
+	protected.POST("/bots/recruit", apiControllers.BondRecruit)
+	protected.GET("/bots/bond/:bot_id", apiControllers.BondShow)
+	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
+	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
+
 	// Verified-only routes (require email verification)
 	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
 	{
@@ -70,27 +86,12 @@ func SetupAPI(r *gin.Engine) {
 		verified.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
 		verified.GET("/v1/stories", apiControllers.GetByBondedBots)
 
-		verified.POST("/bots/recruit", apiControllers.BondRecruit)
-		verified.GET("/bots/bond/:bot_id", apiControllers.BondShow)
-		verified.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
-		verified.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
-
 		// Calendar Routes
 		verified.POST("/v1/calendar", apiControllers.CalendarIndex)
 
 		// Student Request Routes
 		verified.GET("/student-requests", apiControllers.StudentRequestIndex)
 		verified.POST("/student-requests", apiControllers.StudentRequestStore)
-
-		// Backup Routes
-		verified.POST("/user/backup", apiControllers.BackupStore)
-		verified.GET("/user/restore", apiControllers.BackupRestore)
-
-		// User Profile Routes
-		verified.POST("/user/update-email", auth.UpdateEmail)
-		verified.POST("/user/update-name", auth.UpdateName)
-		verified.POST("/user/update-password", auth.UpdatePassword)
-		verified.POST("/user/update-persona", auth.UpdatePersona)
 
 		// ─── System AI Chat (server-side keys) ───
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)
