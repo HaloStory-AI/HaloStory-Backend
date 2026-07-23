@@ -14,9 +14,10 @@ type botTabItem struct {
 	ID         string  `json:"id"`
 	Name       string  `json:"name"`
 	ImageURL   string  `json:"image_url"`
-	Color      string  `json:"color"`
+	Color      *string `json:"color"`
 	Birthday   *string `json:"birthday"`
 	BondHearts int     `json:"bond_hearts"`
+	Child      bool    `json:"child"`
 }
 
 func BotTabIndex(c *gin.Context) {
@@ -34,11 +35,6 @@ func BotTabIndex(c *gin.Context) {
 			continue
 		}
 
-		color := "0xFF607D8B"
-		if bot.Color != nil {
-			color = *bot.Color
-		}
-
 		avatar := ""
 		if bot.Avatar != nil {
 			avatar = *bot.Avatar
@@ -54,9 +50,10 @@ func BotTabIndex(c *gin.Context) {
 			ID:         bot.BotID,
 			Name:       bot.Name,
 			ImageURL:   services.ImageURL(avatar),
-			Color:      color,
+			Color:      bot.Color,
 			Birthday:   birthdayStr,
 			BondHearts: bond.GetLevel(),
+			Child:      bot.Child,
 		})
 	}
 
@@ -74,6 +71,7 @@ type recruitedBotItem struct {
 	Color       string  `json:"color"`
 	Birthday    *string `json:"birthday"`
 	Description *string `json:"description"`
+	Child       bool    `json:"child"`
 }
 
 func RecruitedBotsIndex(c *gin.Context) {
@@ -114,6 +112,7 @@ func RecruitedBotsIndex(c *gin.Context) {
 			Color:       color,
 			Birthday:    birthdayStr,
 			Description: bot.Description,
+			Child:       bot.Child,
 		})
 	}
 

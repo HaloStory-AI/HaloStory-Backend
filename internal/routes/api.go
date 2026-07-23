@@ -56,41 +56,44 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/email/send-verification-otp", auth.SendVerificationOtp)
 	protected.POST("/email/verify", auth.VerifyEmail)
 
+	// Backup Routes (no email verification required — same as Laravel)
+	protected.POST("/user/backup", apiControllers.BackupStore)
+	protected.GET("/user/restore", apiControllers.BackupRestore)
+
+	// User Profile Routes (no email verification required — same as Laravel)
+	protected.POST("/user/update-email", auth.UpdateEmail)
+	protected.POST("/user/update-name", auth.UpdateName)
+	protected.POST("/user/update-password", auth.UpdatePassword)
+	protected.POST("/user/update-persona", auth.UpdatePersona)
+
+	// Bond Routes (no email verification required — same as Laravel)
+	protected.POST("/bots/recruit", apiControllers.BondRecruit)
+	protected.GET("/bots/bond/:bot_id", apiControllers.BondShow)
+	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
+	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
+
+	// Stories & Calendar Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/stories", apiControllers.GetByBondedBots)
+	protected.POST("/v1/calendar", apiControllers.CalendarIndex)
+
+	// Categories, Bot Tab & Recruited Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/categories", apiControllers.CategoryIndex)
+	protected.GET("/v1/category/:slug", apiControllers.CategoryBots)
+	protected.GET("/v1/bot-tab", apiControllers.BotTabIndex)
+
+	// Bot Bio & Recruited Routes (no email verification required — same as Laravel)
+	protected.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
+	protected.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
+
+	// Student Request Routes (no email verification required — same as Laravel)
+	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
+	protected.POST("/student-requests", apiControllers.StudentRequestStore)
+
 	// Verified-only routes (require email verification)
 	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
 	{
-		// Categories Routes
-		verified.GET("/v1/categories", apiControllers.CategoryIndex)
-		verified.GET("/v1/category/:slug", apiControllers.CategoryBots)
-
-		// Bot & Bond Routes
+		// Bot Routes
 		verified.GET("/bots", apiControllers.BotIndex)
-		verified.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
-		verified.GET("/v1/bot-tab", apiControllers.BotTabIndex)
-		verified.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
-		verified.GET("/v1/stories", apiControllers.GetByBondedBots)
-
-		verified.POST("/bots/recruit", apiControllers.BondRecruit)
-		verified.GET("/bots/bond/:bot_id", apiControllers.BondShow)
-		verified.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
-		verified.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
-
-		// Calendar Routes
-		verified.POST("/v1/calendar", apiControllers.CalendarIndex)
-
-		// Student Request Routes
-		verified.GET("/student-requests", apiControllers.StudentRequestIndex)
-		verified.POST("/student-requests", apiControllers.StudentRequestStore)
-
-		// Backup Routes
-		verified.POST("/user/backup", apiControllers.BackupStore)
-		verified.GET("/user/restore", apiControllers.BackupRestore)
-
-		// User Profile Routes
-		verified.POST("/user/update-email", auth.UpdateEmail)
-		verified.POST("/user/update-name", auth.UpdateName)
-		verified.POST("/user/update-password", auth.UpdatePassword)
-		verified.POST("/user/update-persona", auth.UpdatePersona)
 
 		// ─── System AI Chat (server-side keys) ───
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)

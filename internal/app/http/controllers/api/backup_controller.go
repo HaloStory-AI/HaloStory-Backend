@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
@@ -10,30 +12,34 @@ import (
 )
 
 type backupResponse struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message,omitempty"`
-	Data       string `json:"data,omitempty"`
-	LastBackup string `json:"last_backup,omitempty"`
+	Success    bool              `json:"success"`
+	Message    string            `json:"message,omitempty"`
+	Data       *json.RawMessage  `json:"data,omitempty"`
+	LastBackup string            `json:"last_backup,omitempty"`
 }
 
 type storeBackupInput struct {
-	Data string `json:"data" form:"data"`
+	Data string `json:"data" form:"data" binding:"required"`
 }
 
 func BackupStore(c *gin.Context) {
 	var input storeBackupInput
 	if err := c.ShouldBind(&input); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, backupResponse{
-			Success: false,
-			Message: "Validation failed.",
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The data field is required.",
+			"errors": gin.H{
+				"data": []string{"The data field is required."},
+			},
 		})
 		return
 	}
 
-	if input.Data == "" {
-		c.JSON(http.StatusUnprocessableEntity, backupResponse{
-			Success: false,
-			Message: "The data field is required.",
+	if strings.TrimSpace(input.Data) == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The data field is required.",
+			"errors": gin.H{
+				"data": []string{"The data field is required."},
+			},
 		})
 		return
 	}
@@ -78,9 +84,10 @@ func BackupRestore(c *gin.Context) {
 		return
 	}
 
+	rawMsg := json.RawMessage(backup.Data)
 	c.JSON(http.StatusOK, backupResponse{
 		Success:    true,
-		Data:       string(backup.Data),
+		Data:       &rawMsg,
 		LastBackup: backup.UpdatedAt.Format("2006-01-02 15:04:05"),
 	})
 }

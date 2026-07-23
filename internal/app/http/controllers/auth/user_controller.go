@@ -132,19 +132,21 @@ func ResetPassword(c *gin.Context) {
 
 func UpdateEmail(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email" form:"email"`
-		Password string `json:"password" form:"password"`
+		Email    string `json:"email" form:"email" binding:"required,email,max=255"`
+		Password string `json:"password" form:"password" binding:"required"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Format request tidak valid",
-		})
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
-	if strings.TrimSpace(req.Email) == "" || req.Password == "" {
+	if strings.TrimSpace(req.Email) == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Email dan password wajib diisi.",
+			"message": "The email field is required.",
+			"errors": gin.H{
+				"email": []string{"The email field is required."},
+			},
 		})
 		return
 	}
@@ -162,8 +164,11 @@ func UpdateEmail(c *gin.Context) {
 	var count int64
 	database.DB.Model(&models.User{}).Where("email = ? AND id != ?", req.Email, user.ID).Count(&count)
 	if count > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"message": "Email sudah terdaftar.",
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The email has already been taken.",
+			"errors": gin.H{
+				"email": []string{"The email has already been taken."},
+			},
 		})
 		return
 	}
@@ -179,18 +184,20 @@ func UpdateEmail(c *gin.Context) {
 
 func UpdateName(c *gin.Context) {
 	var req struct {
-		Name string `json:"name" form:"name"`
+		Name string `json:"name" form:"name" binding:"required,max=255"`
 	}
-	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.Name) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Nama wajib diisi.",
-		})
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
-	if len(req.Name) > 255 {
+	if strings.TrimSpace(req.Name) == "" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Nama maksimal 255 karakter.",
+			"message": "The name field is required.",
+			"errors": gin.H{
+				"name": []string{"The name field is required."},
+			},
 		})
 		return
 	}
@@ -201,7 +208,8 @@ func UpdateName(c *gin.Context) {
 	database.DB.Model(&user).Update("name", req.Name)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Name updated successfully",
+		"message": "Username updated successfully",
+		"user":    user,
 	})
 }
 
@@ -209,45 +217,22 @@ func UpdateName(c *gin.Context) {
 
 func UpdatePassword(c *gin.Context) {
 	var req struct {
-		CurrentPassword    string `json:"current_password"`
-		NewPassword        string `json:"new_password"`
-		Password           string `json:"password"`
+		CurrentPassword    string `json:"current_password" binding:"required"`
+		NewPassword        string `json:"new_password" binding:"required,min=8"`
 		NewPasswordConfirm string `json:"new_password_confirmation"`
-		PasswordConfirm    string `json:"password_confirmation"`
 	}
 	if err := c.ShouldBind(&req); err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Format request tidak valid",
-		})
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
-	password := req.NewPassword
-	if password == "" {
-		password = req.Password
-	}
-	confirm := req.NewPasswordConfirm
-	if confirm == "" {
-		confirm = req.PasswordConfirm
-	}
-
-	if req.CurrentPassword == "" || password == "" {
+	if req.NewPassword != req.NewPasswordConfirm {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Current password dan password baru wajib diisi.",
-		})
-		return
-	}
-
-	if len(password) < 8 {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Password minimal 8 karakter.",
-		})
-		return
-	}
-
-	if password != confirm {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"message": "Password confirmation tidak cocok.",
+			"message": "The new password confirmation does not match.",
+			"errors": gin.H{
+				"new_password": []string{"The new password confirmation does not match."},
+			},
 		})
 		return
 	}
@@ -257,12 +242,12 @@ func UpdatePassword(c *gin.Context) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{
-			"message": "Current password is incorrect.",
+			"message": "Invalid current password",
 		})
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Gagal mengenkripsi password.",
@@ -281,12 +266,11 @@ func UpdatePassword(c *gin.Context) {
 
 func UpdatePersona(c *gin.Context) {
 	var req struct {
-		Persona string `json:"persona" form:"persona"`
+		Persona *string `json:"persona" form:"persona" binding:"omitempty,max=500"`
 	}
-	if err := c.ShouldBind(&req); err != nil || strings.TrimSpace(req.Persona) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Persona wajib diisi.",
-		})
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
 		return
 	}
 
@@ -297,6 +281,7 @@ func UpdatePersona(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Persona updated successfully",
+		"user":    user,
 	})
 }
 
