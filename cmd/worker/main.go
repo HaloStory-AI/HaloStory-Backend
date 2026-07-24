@@ -207,6 +207,8 @@ func processJob(rawData []byte) {
 	}
 
 	switch data.Provider {
+	case "mock":
+		processMockChat(uuid, storeKey, data)
 	case "openai-compatible", "mistral", "deepseek", "openrouter", "zai":
 		processOpenAIChat(uuid, storeKey, data)
 	case "claude":
@@ -1481,6 +1483,36 @@ func providerDefaultBaseURL(provider string) string {
 	default:
 		return ""
 	}
+}
+
+func processMockChat(uuid, storeKey string, data chatData) {
+	data.Status = "processing"
+	updateJSON, _ := json.Marshal(data)
+	services.StoreChatResult(uuid, updateJSON, 10*time.Minute)
+
+	time.Sleep(200 * time.Millisecond)
+
+	response := map[string]interface{}{
+		"choices": []map[string]interface{}{
+			{
+				"index": 0,
+				"message": map[string]interface{}{
+					"role":    "assistant",
+					"content": "Mock response for testing.",
+				},
+				"finish_reason": "stop",
+			},
+		},
+		"usage": map[string]interface{}{
+			"prompt_tokens":     10,
+			"completion_tokens": 5,
+			"total_tokens":      15,
+		},
+	}
+
+	respJSON, _ := json.Marshal(response)
+	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), 200)
+	log.Printf("Worker: Completed mock job %s", uuid)
 }
 
 func markError(uuid, storeKey, message string, statusCode int) {

@@ -110,6 +110,7 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/byok/deepseek/chat", byokControllers.DeepSeekChat)
 		verified.POST("/byok/openrouter/chat", byokControllers.OpenRouterChat)
 		verified.POST("/byok/zai/chat", byokControllers.ZAIChat)
+		verified.POST("/byok/mock/chat", byokControllers.MockChat)
 		verified.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
 		verified.POST("/byok/models", byokControllers.FetchModels)
 	}
