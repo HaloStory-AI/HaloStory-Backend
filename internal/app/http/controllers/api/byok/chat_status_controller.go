@@ -38,8 +38,6 @@ func ChatStatus(c *gin.Context) {
 
 		responseData := result["response"]
 		c.JSON(statusCode, responseData)
-
-		services.DeleteChatResult(uuid)
 		return
 	}
 
