@@ -12,6 +12,7 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_DEBUG: ${APP_DEBUG:-false}
+      TZ: Asia/Jakarta
       DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
       DB_PORT: ${DB_PORT:-3306}
       DB_DATABASE: ${DB_DATABASE:-halostory}
@@ -44,6 +45,7 @@ services:
       - .env
     environment:
       DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      TZ: Asia/Jakarta
       REDIS_HOST: redis
       REDIS_PORT: 6379
     extra_hosts:
@@ -76,6 +78,7 @@ services:
       - .env
     environment:
       DB_HOST: ${DB_HOST:-holox-maria-r0wusp}
+      TZ: Asia/Jakarta
       REDIS_HOST: redis
       REDIS_PORT: 6379
     extra_hosts:
