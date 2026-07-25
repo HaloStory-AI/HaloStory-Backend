@@ -79,65 +79,44 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	deadline := time.Now().Add(180 * time.Second)
-	maxRetries := 10
-	var lastResp *http.Response
-	var lastErr error
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		if time.Now().After(deadline) {
-			return nil, 0, fmt.Errorf("deadline exceeded after %d attempts", attempt-1)
-		}
-
-		req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("Content-Type", "application/json")
-
-		if opts != nil && opts.ExtraHeaders != nil {
-			for k, v := range opts.ExtraHeaders {
-				req.Header.Set(k, v)
-			}
-		}
-
-		client := &http.Client{Timeout: timeout}
-		lastResp, lastErr = client.Do(req)
-		if lastErr != nil {
-			if attempt < maxRetries {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return nil, 0, fmt.Errorf("request failed after %d attempts: %w", maxRetries, lastErr)
-		}
-		if lastResp.StatusCode == 429 {
-			lastResp.Body.Close()
-			return nil, lastResp.StatusCode, fmt.Errorf("rate limited (429)")
-		}
-
-		respBody, err := io.ReadAll(lastResp.Body)
-		lastResp.Body.Close()
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		if lastResp.StatusCode < 200 || lastResp.StatusCode >= 300 {
-			if attempt < maxRetries {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return nil, lastResp.StatusCode, fmt.Errorf("API error (status %d): %s", lastResp.StatusCode, string(respBody))
-		}
-
-		var openAIResp OpenAICompatResponse
-		if err := json.Unmarshal(respBody, &openAIResp); err != nil {
-			return nil, 0, fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		return &openAIResp, lastResp.StatusCode, nil
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return nil, 0, fmt.Errorf("unexpected error after retries")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	if opts != nil && opts.ExtraHeaders != nil {
+		for k, v := range opts.ExtraHeaders {
+			req.Header.Set(k, v)
+		}
+	}
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		return nil, resp.StatusCode, fmt.Errorf("rate limited (429)")
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var openAIResp OpenAICompatResponse
+	if err := json.Unmarshal(respBody, &openAIResp); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &openAIResp, resp.StatusCode, nil
 }

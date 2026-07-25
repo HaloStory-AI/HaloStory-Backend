@@ -108,58 +108,41 @@ func CallGemini(apiKey string, model string, payload GeminiRequest) (*GeminiResp
 		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	maxRetries := 10
-	var lastResp *http.Response
-	var lastErr error
-
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("x-goog-api-key", apiKey)
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 120 * time.Second}
-		lastResp, lastErr = client.Do(req)
-		if lastErr != nil {
-			if attempt < maxRetries {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return nil, 0, fmt.Errorf("request failed after %d attempts: %w", maxRetries, lastErr)
-		}
-		if lastResp.StatusCode == 429 {
-			lastResp.Body.Close()
-			return nil, lastResp.StatusCode, fmt.Errorf("rate limited (429)")
-		}
-
-		if lastResp.StatusCode < 200 || lastResp.StatusCode >= 300 {
-			respBody, _ := io.ReadAll(lastResp.Body)
-			lastResp.Body.Close()
-			if attempt < maxRetries {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			return nil, lastResp.StatusCode, fmt.Errorf("API error (status %d): %s", lastResp.StatusCode, string(respBody))
-		}
-
-		respBody, err := io.ReadAll(lastResp.Body)
-		lastResp.Body.Close()
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		var geminiResp GeminiResponse
-		if err := json.Unmarshal(respBody, &geminiResp); err != nil {
-			return nil, 0, fmt.Errorf("failed to parse response: %w", err)
-		}
-
-		return &geminiResp, lastResp.StatusCode, nil
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	return nil, 0, fmt.Errorf("unexpected error after retries")
+	req.Header.Set("x-goog-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		return nil, resp.StatusCode, fmt.Errorf("rate limited (429)")
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var geminiResp GeminiResponse
+	if err := json.Unmarshal(respBody, &geminiResp); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &geminiResp, resp.StatusCode, nil
 }
 
 func ConvertToOpenAIFormat(geminiResp *GeminiResponse, model string) *OpenAIResponse {
