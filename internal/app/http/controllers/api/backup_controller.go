@@ -52,13 +52,25 @@ func BackupStore(c *gin.Context) {
 
 	if result.Error == nil {
 		existing.Data = models.JSON(input.Data)
-		database.DB.Save(&existing)
+		if err := database.DB.Save(&existing).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, backupResponse{
+				Success: false,
+				Message: "Failed to save backup: " + err.Error(),
+			})
+			return
+		}
 	} else {
 		backup := models.UserBackup{
 			UserID: user.ID,
 			Data:   models.JSON(input.Data),
 		}
-		database.DB.Create(&backup)
+		if err := database.DB.Create(&backup).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, backupResponse{
+				Success: false,
+				Message: "Failed to create backup: " + err.Error(),
+			})
+			return
+		}
 		existing = backup
 	}
 
