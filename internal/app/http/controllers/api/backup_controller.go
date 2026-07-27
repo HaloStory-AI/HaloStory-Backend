@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -12,10 +11,10 @@ import (
 )
 
 type backupResponse struct {
-	Success    bool              `json:"success"`
-	Message    string            `json:"message,omitempty"`
-	Data       *json.RawMessage  `json:"data,omitempty"`
-	LastBackup string            `json:"last_backup,omitempty"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message,omitempty"`
+	Data       string `json:"data,omitempty"`
+	LastBackup string `json:"last_backup,omitempty"`
 }
 
 type storeBackupInput struct {
@@ -96,10 +95,9 @@ func BackupRestore(c *gin.Context) {
 		return
 	}
 
-	rawMsg := json.RawMessage(backup.Data)
 	c.JSON(http.StatusOK, backupResponse{
 		Success:    true,
-		Data:       &rawMsg,
+		Data:       string(backup.Data),
 		LastBackup: backup.UpdatedAt.Format("2006-01-02 15:04:05"),
 	})
 }
