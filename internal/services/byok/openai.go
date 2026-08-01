@@ -18,6 +18,7 @@ type OpenAIChatMessage struct {
 type OpenAICompatRequest struct {
 	Model             string               `json:"model"`
 	Messages          []OpenAIChatMessage  `json:"messages"`
+	Stream            *bool                `json:"stream,omitempty"`
 	Temperature       *float64             `json:"temperature,omitempty"`
 	MaxTokens         *int                 `json:"max_tokens,omitempty"`
 	TopP              *float64             `json:"top_p,omitempty"`
@@ -64,6 +65,12 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 		payload.Model = model
 	}
 
+	// Always request a non-streaming JSON response. Some OpenAI-compatible
+	// providers/routers (e.g. 9Router) stream by default when `stream` is
+	// omitted; this pipeline expects a single JSON body.
+	stream := false
+	payload.Stream = &stream
+
 	bodyMap := make(map[string]interface{})
 	bodyBytes, _ := json.Marshal(payload)
 	json.Unmarshal(bodyBytes, &bodyMap)
@@ -86,6 +93,7 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 
 	if opts != nil && opts.ExtraHeaders != nil {
 		for k, v := range opts.ExtraHeaders {
