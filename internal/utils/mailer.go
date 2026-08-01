@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"halostory_go_backend/internal/config"
-	"halostory_go_backend/internal/templates"
+	"halostory_go_backend/internal/services/templates"
 
 	"gopkg.in/gomail.v2"
 )

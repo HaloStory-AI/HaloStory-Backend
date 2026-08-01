@@ -23,39 +23,39 @@ import (
 )
 
 type ChatJobPayload struct {
-	UUID     string `json:"uuid"`
-	UserID   uint   `json:"user_id"`
-	BotID    string `json:"bot_id"`
-	IsGroup  bool   `json:"is_group"`
+	UUID    string `json:"uuid"`
+	UserID  uint   `json:"user_id"`
+	BotID   string `json:"bot_id"`
+	IsGroup bool   `json:"is_group"`
 }
 
 type chatData struct {
-	Status            string                   `json:"status"`
-	APIKey            string                   `json:"api_key"`
-	Messages          string                   `json:"messages"`
-	Model             string                   `json:"model"`
-	Provider          string                   `json:"provider"`
-	BaseURL           string                   `json:"base_url,omitempty"`
-	UserID            float64                  `json:"user_id"`
-	BotID             string                   `json:"bot_id"`
-	Language          string                   `json:"language,omitempty"`
-	Temperature       float64                  `json:"temperature,omitempty"`
-	MaxTokens         float64                  `json:"max_tokens,omitempty"`
-	TopP              float64                  `json:"top_p,omitempty"`
-	TopK              float64                  `json:"top_k,omitempty"`
-	PresencePenalty   float64                  `json:"presence_penalty,omitempty"`
-	FrequencyPenalty  float64                  `json:"frequency_penalty,omitempty"`
-	Summary           string                   `json:"summary,omitempty"`
-	IsSummarize       bool                     `json:"is_summarize,omitempty"`
-	HistoryDepth      float64                  `json:"history_depth,omitempty"`
-	IsGroup           bool                     `json:"is_group,omitempty"`
-	IsDisableBond     bool                     `json:"isdisablebond,omitempty"`
-	UserPersona       string                   `json:"user_persona,omitempty"`
-	BotIDs            []string                 `json:"bot_ids,omitempty"`
-	ExistingMemories  []string                 `json:"existing_memories,omitempty"`
-	Reasoning         *reasoningConfig         `json:"reasoning,omitempty"`
-	Stop              []string                 `json:"stop,omitempty"`
-	ResponseLength    float64                  `json:"response_length,omitempty"`
+	Status           string           `json:"status"`
+	APIKey           string           `json:"api_key"`
+	Messages         string           `json:"messages"`
+	Model            string           `json:"model"`
+	Provider         string           `json:"provider"`
+	BaseURL          string           `json:"base_url,omitempty"`
+	UserID           float64          `json:"user_id"`
+	BotID            string           `json:"bot_id"`
+	Language         string           `json:"language,omitempty"`
+	Temperature      float64          `json:"temperature,omitempty"`
+	MaxTokens        float64          `json:"max_tokens,omitempty"`
+	TopP             float64          `json:"top_p,omitempty"`
+	TopK             float64          `json:"top_k,omitempty"`
+	PresencePenalty  float64          `json:"presence_penalty,omitempty"`
+	FrequencyPenalty float64          `json:"frequency_penalty,omitempty"`
+	Summary          string           `json:"summary,omitempty"`
+	IsSummarize      bool             `json:"is_summarize,omitempty"`
+	HistoryDepth     float64          `json:"history_depth,omitempty"`
+	IsGroup          bool             `json:"is_group,omitempty"`
+	IsDisableBond    bool             `json:"isdisablebond,omitempty"`
+	UserPersona      string           `json:"user_persona,omitempty"`
+	BotIDs           []string         `json:"bot_ids,omitempty"`
+	ExistingMemories []string         `json:"existing_memories,omitempty"`
+	Reasoning        *reasoningConfig `json:"reasoning,omitempty"`
+	Stop             []string         `json:"stop,omitempty"`
+	ResponseLength   float64          `json:"response_length,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -66,11 +66,47 @@ type reasoningConfig struct {
 }
 
 func isSystemAIJob(data []byte) bool {
-	var p struct{ Provider string `json:"provider"` }
+	var p struct {
+		Provider string `json:"provider"`
+	}
 	if err := json.Unmarshal(data, &p); err != nil {
 		return false
 	}
 	return p.Provider == "system-ai"
+}
+
+func jobIsPriority(data []byte) bool {
+	var p struct {
+		IsPriority bool `json:"is_priority"`
+	}
+	if err := json.Unmarshal(data, &p); err != nil {
+		return false
+	}
+	return p.IsPriority
+}
+
+func dispatchJob(data []byte, sem chan struct{}, goroutineName string) {
+	sem <- struct{}{}
+	go func(d []byte) {
+		var jobUUID string
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Worker: RECOVERED panic in %s goroutine: %v", goroutineName, r)
+				if jobUUID != "" {
+					markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
+				}
+			}
+			<-sem
+		}()
+		// Pre-extract uuid for panic recovery
+		var rawPayload map[string]interface{}
+		if json.Unmarshal(d, &rawPayload) == nil {
+			if u, ok := rawPayload["uuid"].(string); ok {
+				jobUUID = u
+			}
+		}
+		processJob(d)
+	}(data)
 }
 
 func main() {
@@ -86,7 +122,7 @@ func main() {
 	}
 	mainSem := make(chan struct{}, maxWorkers)
 	sysSem := make(chan struct{}, 6)
-	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: 6", maxWorkers)
+	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: 6 (free), VIP routed to BYOK pool", maxWorkers)
 
 	go func() {
 		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -115,49 +151,13 @@ func main() {
 			backoff = 100 * time.Millisecond
 
 			if isSystemAIJob(data) {
-				sysSem <- struct{}{}
-				go func(d []byte) {
-					var jobUUID string
-					defer func() {
-						if r := recover(); r != nil {
-							log.Printf("Worker: RECOVERED panic in sys goroutine: %v", r)
-							if jobUUID != "" {
-								markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
-							}
-						}
-						<-sysSem
-					}()
-					// Pre-extract uuid for panic recovery
-					var rawPayload map[string]interface{}
-					if json.Unmarshal(d, &rawPayload) == nil {
-						if u, ok := rawPayload["uuid"].(string); ok {
-							jobUUID = u
-						}
-					}
-					processJob(d)
-				}(data)
+				if jobIsPriority(data) {
+					dispatchJob(data, mainSem, "main")
+				} else {
+					dispatchJob(data, sysSem, "sys")
+				}
 			} else {
-				mainSem <- struct{}{}
-				go func(d []byte) {
-					var jobUUID string
-					defer func() {
-						if r := recover(); r != nil {
-							log.Printf("Worker: RECOVERED panic in main goroutine: %v", r)
-							if jobUUID != "" {
-								markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
-							}
-						}
-						<-mainSem
-					}()
-					// Pre-extract uuid for panic recovery
-					var rawPayload map[string]interface{}
-					if json.Unmarshal(d, &rawPayload) == nil {
-						if u, ok := rawPayload["uuid"].(string); ok {
-							jobUUID = u
-						}
-					}
-					processJob(d)
-				}(data)
+				dispatchJob(data, mainSem, "main")
 			}
 		}
 	}()
@@ -698,8 +698,8 @@ func handleSystemAISummarization(uuid, storeKey string, data chatData, messages 
 	}
 
 	params := &systemai.SystemAIChatParams{
-		Language:     lang,
-		IsSummarize:  true,
+		Language:    lang,
+		IsSummarize: true,
 	}
 
 	start := time.Now()
@@ -1292,22 +1292,22 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 	}
 
 	payloadMap := map[string]interface{}{
-		"model":            data.Model,
-		"temperature":      data.Temperature,
-		"top_p":            data.TopP,
-		"top_k":            data.TopK,
-		"response_length":  data.ResponseLength,
-		"max_tokens":       data.MaxTokens,
-		"stop":             data.Stop,
-		"reasoning":        data.Reasoning,
-		"bot_id":           data.BotID,
-		"user_id":          data.UserID,
-		"language":         data.Language,
-		"history_depth":    data.HistoryDepth,
-		"is_group":         data.IsGroup,
-		"isdisablebond":    data.IsDisableBond,
-		"user_persona":     data.UserPersona,
-		"bot_ids":          data.BotIDs,
+		"model":             data.Model,
+		"temperature":       data.Temperature,
+		"top_p":             data.TopP,
+		"top_k":             data.TopK,
+		"response_length":   data.ResponseLength,
+		"max_tokens":        data.MaxTokens,
+		"stop":              data.Stop,
+		"reasoning":         data.Reasoning,
+		"bot_id":            data.BotID,
+		"user_id":           data.UserID,
+		"language":          data.Language,
+		"history_depth":     data.HistoryDepth,
+		"is_group":          data.IsGroup,
+		"isdisablebond":     data.IsDisableBond,
+		"user_persona":      data.UserPersona,
+		"bot_ids":           data.BotIDs,
 		"existing_memories": data.ExistingMemories,
 	}
 
@@ -1397,8 +1397,8 @@ func handleClaudeSummarization(uuid, storeKey string, data chatData, decryptedKe
 	prompt := byok.BuildSummarizationPrompt(parsedMessages, lang, data.ExistingMemories)
 
 	payload := byok.ClaudeRequest{
-		Model:     data.Model,
-		MaxTokens: 16000,
+		Model:       data.Model,
+		MaxTokens:   16000,
 		Temperature: func() *float64 { t := 0.9; return &t }(),
 		Messages: []byok.ClaudeMessage{
 			{Role: "user", Content: prompt},
