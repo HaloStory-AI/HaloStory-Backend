@@ -3,184 +3,24 @@ package systemai
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
-	"strings"
-	"time"
 
 	"halostory_go_backend/internal/config"
-	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
 )
 
-func getSystemApiKeys(label string) []string {
-	envKey, ok := ProviderEnvKeys[label]
-	if !ok {
-		return nil
+func buildChain(isVip bool) []ChainEntry {
+	model := FreeUserModel
+	if isVip {
+		model = VipUserModel
 	}
-	raw := config.Env(envKey, "")
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	keys := make([]string, 0, len(parts))
-	for _, p := range parts {
-		trimmed := strings.TrimSpace(p)
-		if trimmed != "" {
-			keys = append(keys, trimmed)
-		}
-	}
-	return keys
-}
-
-func selectKey(keys []string) (string, int) {
-	if len(keys) == 0 {
-		return "", 0
-	}
-	idx := rand.Intn(len(keys))
-	return keys[idx], idx
-}
-
-func rotateKey(provider string, currentIdx int) {
-	idxKey := fmt.Sprintf("vip_key_index_%s", provider)
-	services.RedisClient.SetEx(services.RedisCtx, idxKey, int64(currentIdx+1), time.Hour)
-}
-
-func isProviderCircuitBroken(provider string) bool {
-	key := fmt.Sprintf("ai_circuit_failures_%s", provider)
-	val, err := services.RedisClient.Get(services.RedisCtx, key).Int()
-	if err != nil {
-		return false
-	}
-	return val >= CircuitBreakerLimit
-}
-
-func recordProviderFailure(provider string) {
-	key := fmt.Sprintf("ai_circuit_failures_%s", provider)
-	val, err := services.RedisClient.Get(services.RedisCtx, key).Int()
-	if err != nil {
-		val = 0
-	}
-	services.RedisClient.SetEx(services.RedisCtx, key, val+1, CircuitBreakerWindow)
-}
-
-func resetProviderCircuit(provider string) {
-	key := fmt.Sprintf("ai_circuit_failures_%s", provider)
-	services.RedisClient.Del(services.RedisCtx, key)
-}
-
-func buildPriorityChain(isVip bool) []ChainEntry {
-	if !isVip {
-		return RegularChain
-	}
-	priorityEntries := make([]ChainEntry, 0)
-	priorityKeys := getSystemApiKeys("huashang_priority")
-	if len(priorityKeys) > 0 {
-		priorityEntries = append(priorityEntries,
-			ChainEntry{Provider: "huashang_priority", Model: "deepseek-ai/deepseek-v4-flash", Config: ProviderConfig{Label: "huashang_priority", BaseURL: "https://api.huashang.ai/v1"}},
-		)
-	}
-	geminiPriorityKeys := getSystemApiKeys("gemini_priority")
-	if len(geminiPriorityKeys) > 0 {
-		for _, m := range PriorityModels {
-			priorityEntries = append(priorityEntries, ChainEntry{Provider: "gemini_priority", Model: m, Config: ProviderConfig{Label: "gemini_priority", IsGemini: true}})
-		}
-	}
-	if len(priorityEntries) == 0 {
-		return RegularChain
-	}
-	chain := make([]ChainEntry, 0, len(priorityEntries)+len(RegularChain))
-	chain = append(chain, priorityEntries...)
-	chain = append(chain, RegularChain...)
-	return chain
-}
-
-func buildGeminiRequest(messages []byok.Message, model string, params *SystemAIChatParams) byok.GeminiRequest {
-	contents := make([]byok.GeminiContent, 0)
-	var systemInstruct *byok.GeminiContent
-	systemText := ""
-
-	isGemma := strings.Contains(model, "gemma")
-	isModernGemma := false
-	if len(model) >= 10 {
-		lastChar := model[len(model)-1]
-		isModernGemma = isGemma && lastChar >= '2' && lastChar <= '9'
-	}
-	supportsSystemInstruction := !isGemma || isModernGemma
-
-	for _, msg := range messages {
-		if msg.Role == "system" {
-			if !supportsSystemInstruction {
-				systemText = msg.Content
-			} else {
-				systemInstruct = &byok.GeminiContent{
-					Parts: []byok.GeminiPart{{Text: msg.Content}},
-				}
-			}
-			continue
-		}
-		role := "user"
-		if msg.Role == "assistant" {
-			role = "model"
-		}
-		text := msg.Content
-		if !supportsSystemInstruction && len(contents) == 0 && role == "user" && systemText != "" {
-			text = systemText + "\n\n" + text
-		}
-		contents = append(contents, byok.GeminiContent{
-			Role:  role,
-			Parts: []byok.GeminiPart{{Text: text}},
-		})
-	}
-	if !supportsSystemInstruction && len(contents) == 0 && systemText != "" {
-		contents = append(contents, byok.GeminiContent{
-			Role:  "user",
-			Parts: []byok.GeminiPart{{Text: systemText}},
-		})
-	}
-
-	temp := DefaultTemperature
-	if params.Temperature != 0 {
-		temp = params.Temperature
-	}
-	topP := 1.0
-	if params.TopP != 0 {
-		topP = params.TopP
-	}
-	topK := 40
-	if params.TopK != 0 {
-		topK = params.TopK
-	}
-	maxOut := DefaultResponseLen
-	if params.ResponseLength != 0 {
-		maxOut = params.ResponseLength
-	} else if params.MaxTokens != 0 {
-		maxOut = params.MaxTokens
-	}
-
-	genConfig := byok.GenerationConfig{
-		Temperature:     temp,
-		TopP:            topP,
-		TopK:            topK,
-		MaxOutputTokens: maxOut,
-		StopSequences:   params.Stop,
-	}
-
-	if isGemma {
-		if genConfig.ThinkingConfig == nil {
-			genConfig.ThinkingConfig = &byok.ThinkingConfig{}
-		}
-		genConfig.ThinkingConfig.ThinkingLevel = "MINIMAL"
-	}
-
-	req := byok.GeminiRequest{
-		Contents:       contents,
-		GenerationConfig: genConfig,
-		SafetySettings: byok.DefaultSafetySettings,
-	}
-	if systemInstruct != nil {
-		req.SystemInstruction = systemInstruct
-	}
-	return req
+	return []ChainEntry{{
+		Provider: "router",
+		Model:    model,
+		Config: ProviderConfig{
+			Label:   "router",
+			BaseURL: config.Env("ROUTER_SYSTEM_URL", RouterBaseURL),
+		},
+	}}
 }
 
 func buildOpenAIRequest(messages []byok.Message, model string, params *SystemAIChatParams) byok.OpenAICompatRequest {
@@ -233,16 +73,16 @@ func buildOpenAIRequest(messages []byok.Message, model string, params *SystemAIC
 	}
 
 	return byok.OpenAICompatRequest{
-		Model:            model,
-		Messages:         openaiMessages,
-		Temperature:      &temp,
-		MaxTokens:        &maxOut,
-		TopP:             &topP,
-		PresencePenalty:  &presPenalty,
-		FrequencyPenalty: &freqPenalty,
-		MinP:             &minP,
+		Model:             model,
+		Messages:          openaiMessages,
+		Temperature:       &temp,
+		MaxTokens:         &maxOut,
+		TopP:              &topP,
+		PresencePenalty:   &presPenalty,
+		FrequencyPenalty:  &freqPenalty,
+		MinP:              &minP,
 		RepetitionPenalty: &repPenalty,
-		Stop:             params.Stop,
+		Stop:              params.Stop,
 	}
 }
 
@@ -291,134 +131,65 @@ func extractContent(m map[string]interface{}) string {
 }
 
 func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
-	result := &ChainResult{
-		Pings: make([]PingLog, 0),
-	}
-	startTime := time.Now()
-	chain := buildPriorityChain(isVip)
+	chain := buildChain(isVip)
+	entry := chain[0]
 
-	for _, entry := range chain {
-		if time.Since(startTime) > ChainTimeout {
-			result.Pings = append(result.Pings, PingLog{
-				Provider: entry.Provider,
-				Model:    entry.Model,
-				Status:   "skipped",
-				Detail:   "chain timeout exceeded",
-			})
-			break
-		}
+	pings := make([]PingLog, 0)
 
-		label := entry.Config.Label
-
-		keys := getSystemApiKeys(label)
-		if len(keys) == 0 {
-			result.Pings = append(result.Pings, PingLog{
-				Provider: entry.Provider,
-				Model:    entry.Model,
-				Status:   "skipped",
-				Detail:   "no API keys configured",
-			})
-			continue
-		}
-
-		if isProviderCircuitBroken(entry.Provider) {
-			result.Pings = append(result.Pings, PingLog{
-				Provider: entry.Provider,
-				Model:    entry.Model,
-				Status:   "skipped",
-				Detail:   "circuit breaker open",
-			})
-			continue
-		}
-
-		for attempt := 0; attempt < len(keys); attempt++ {
-			var key string
-			var idx int
-			if isVip {
-				idx = attempt
-				key = keys[idx%len(keys)]
-			} else {
-				key, idx = selectKey(keys)
-			}
-
-			var resp interface{}
-			var statusCode int
-			var callErr error
-
-			if entry.Config.IsGemini {
-				req := buildGeminiRequest(messages, entry.Model, params)
-				geminiResp, code, err := byok.CallGemini(key, entry.Model, req)
-				statusCode = code
-				callErr = err
-				if err == nil {
-					resp = byok.ConvertToOpenAIFormat(geminiResp, entry.Model)
-				}
-			} else {
-				baseURL := entry.Config.BaseURL
-				if baseURL == "" {
-					if u, ok := ProviderBaseURLs[entry.Provider]; ok {
-						baseURL = u
-					} else {
-						result.Pings = append(result.Pings, PingLog{
-							Provider: entry.Provider,
-							Model:    entry.Model,
-							Status:   "error",
-							Detail:   "no base URL for provider",
-						})
-						continue
-					}
-				}
-				reqPayload := buildOpenAIRequest(messages, entry.Model, params)
-				openaiResp, code, err := byok.CallOpenAI(key, baseURL, entry.Model, reqPayload, RequestTimeout, nil)
-				statusCode = code
-				callErr = err
-				if err == nil {
-					resp = openaiResp
-				}
-			}
-
-			if callErr == nil && resp != nil {
-				normalized, content := normalizeResponse(resp)
-				if content == "" {
-					result.Pings = append(result.Pings, PingLog{
-						Provider: entry.Provider,
-						Model:    entry.Model,
-						Status:   "error",
-						Detail:   "empty response content",
-					})
-					continue
-				}
-				resetProviderCircuit(entry.Provider)
-				if isVip {
-					rotateKey(entry.Provider, idx)
-				}
-				result.Response = normalized
-				result.Content = content
-				result.StatusCode = statusCode
-				result.Pings = append(result.Pings, PingLog{
-					Provider: entry.Provider,
-					Model:    entry.Model,
-					Status:   "success",
-				})
-				return result
-			}
-
-			errMsg := ""
-			if callErr != nil {
-				errMsg = callErr.Error()
-			}
-			recordProviderFailure(entry.Provider)
-			result.Pings = append(result.Pings, PingLog{
+	apiKey := config.Env("ROUTER_SYSTEM_KEY", "")
+	if apiKey == "" {
+		return &ChainResult{
+			StatusCode: 503,
+			Error:      "router API key not configured",
+			Pings: []PingLog{{
 				Provider: entry.Provider,
 				Model:    entry.Model,
 				Status:   "error",
-				Detail:   fmt.Sprintf("attempt %d: HTTP %d - %s", attempt+1, statusCode, errMsg),
-			})
-			time.Sleep(300 * time.Millisecond)
+				Detail:   "no API key configured",
+			}},
 		}
 	}
 
-	result.Error = "All system AI models failed"
-	result.StatusCode = 503
-	return result
+	reqPayload := buildOpenAIRequest(messages, entry.Model, params)
+	openaiResp, code, err := byok.CallOpenAI(apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
+	if err != nil {
+		pings = append(pings, PingLog{
+			Provider: entry.Provider,
+			Model:    entry.Model,
+			Status:   "error",
+			Detail:   err.Error(),
+		})
+		return &ChainResult{
+			StatusCode: code,
+			Error:      fmt.Sprintf("router request failed: %v", err),
+			Pings:      pings,
+		}
+	}
+
+	normalized, content := normalizeResponse(openaiResp)
+	if content == "" {
+		pings = append(pings, PingLog{
+			Provider: entry.Provider,
+			Model:    entry.Model,
+			Status:   "error",
+			Detail:   "empty response content",
+		})
+		return &ChainResult{
+			StatusCode: code,
+			Error:      "router returned empty response content",
+			Pings:      pings,
+		}
+	}
+
+	pings = append(pings, PingLog{
+		Provider: entry.Provider,
+		Model:    entry.Model,
+		Status:   "success",
+	})
+	return &ChainResult{
+		Response:   normalized,
+		Content:    content,
+		StatusCode: code,
+		Pings:      pings,
+	}
 }
