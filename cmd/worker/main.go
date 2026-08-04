@@ -882,9 +882,16 @@ func handleGeminiSummarization(uuid, storeKey string, data chatData, decryptedKe
 }
 
 func markSummaryCompleted(uuid, storeKey, summary string, memories []string, statusCode int, isError bool) {
+	if memories == nil {
+		memories = []string{}
+	}
 	response := map[string]interface{}{
 		"summary":              summary,
 		"memory_worth_keeping": memories,
+	}
+	if isError {
+		response["error"] = true
+		response["error_status_code"] = statusCode
 	}
 	respJSON, _ := json.Marshal(response)
 	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
@@ -1517,7 +1524,8 @@ func processMockChat(uuid, storeKey string, data chatData) {
 
 func markError(uuid, storeKey, message string, statusCode int) {
 	respJSON, _ := json.Marshal(map[string]interface{}{
-		"error": message,
+		"error":             message,
+		"error_status_code": statusCode,
 	})
 	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Error job %s: %s (status %d)", uuid, message, statusCode)
