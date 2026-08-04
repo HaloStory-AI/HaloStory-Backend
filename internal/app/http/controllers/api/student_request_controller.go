@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -75,6 +76,60 @@ func StudentRequestIndex(c *gin.Context) {
 
 type storeStudentRequestInput struct {
 	StudentName string `json:"student_name" form:"student_name" binding:"required,max=100"`
+}
+
+type botCheckItem struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	ImageURL   string  `json:"image_url"`
+	Color      *string `json:"color"`
+	Birthday   *string `json:"birthday"`
+	Child      bool    `json:"child"`
+}
+
+func StudentRequestCheck(c *gin.Context) {
+	var input storeStudentRequestInput
+	if err := c.ShouldBind(&input); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The student name field is required and must not exceed 100 characters.",
+			"errors": gin.H{
+				"student_name": []string{"The student name field is required and must not exceed 100 characters."},
+			},
+		})
+		return
+	}
+
+	input.StudentName = strings.TrimSpace(input.StudentName)
+
+	escaped := regexp.QuoteMeta(input.StudentName)
+
+	var bots []models.Bot
+	database.DB.Where("name REGEXP ?", escaped).Find(&bots)
+
+	response := make([]botCheckItem, 0)
+	for _, bot := range bots {
+		avatar := ""
+		if bot.Avatar != nil {
+			avatar = *bot.Avatar
+		}
+
+		var birthdayStr *string
+		if bot.Birthday != nil {
+			str := bot.Birthday.Format("2006-01-02")
+			birthdayStr = &str
+		}
+
+		response = append(response, botCheckItem{
+			ID:       bot.BotID,
+			Name:     bot.Name,
+			ImageURL: services.ImageURL(avatar),
+			Color:    bot.Color,
+			Birthday: birthdayStr,
+			Child:    bot.Child,
+		})
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func StudentRequestStore(c *gin.Context) {

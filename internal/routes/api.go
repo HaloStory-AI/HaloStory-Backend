@@ -88,6 +88,7 @@ func SetupAPI(r *gin.Engine) {
 	// Student Request Routes (no email verification required — same as Laravel)
 	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
 	protected.POST("/student-requests", apiControllers.StudentRequestStore)
+	protected.POST("/student-request/check", apiControllers.StudentRequestCheck)
 
 	// Verified-only routes (require email verification)
 	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
