@@ -1,4 +1,4 @@
-.PHONY: dev build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs
+.PHONY: dev build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs docker-worker-up docker-worker-down docker-worker-logs docker-worker-build
 
 dev:
 	air
@@ -37,3 +37,15 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f
+
+docker-worker-build:
+	docker compose -f docker-compose.worker.yml build
+
+docker-worker-up:
+	docker compose -f docker-compose.worker.yml up -d --build
+
+docker-worker-down:
+	docker compose -f docker-compose.worker.yml down
+
+docker-worker-logs:
+	docker compose -f docker-compose.worker.yml logs -f
