@@ -10,8 +10,11 @@ import (
 
 func buildChain(isVip bool) []ChainEntry {
 	model := FreeUserModel
+	temp := 0.8
+	topP := 0.95
 	if isVip {
 		model = VipUserModel
+		topP = 0.8
 	}
 	return []ChainEntry{{
 		Provider: "router",
@@ -20,10 +23,15 @@ func buildChain(isVip bool) []ChainEntry {
 			Label:   "router",
 			BaseURL: config.Env("ROUTER_SYSTEM_URL", RouterBaseURL),
 		},
+		Temperature:      temp,
+		TopP:             topP,
+		MaxTokens:        32000,
+		PresencePenalty:  0.5,
+		FrequencyPenalty: 0.2,
 	}}
 }
 
-func buildOpenAIRequest(messages []byok.Message, model string, params *SystemAIChatParams) byok.OpenAICompatRequest {
+func buildOpenAIRequest(messages []byok.Message, entry ChainEntry) byok.OpenAICompatRequest {
 	openaiMessages := make([]byok.OpenAIChatMessage, 0, len(messages))
 	for _, msg := range messages {
 		role := msg.Role
@@ -40,49 +48,29 @@ func buildOpenAIRequest(messages []byok.Message, model string, params *SystemAIC
 		})
 	}
 
-	temp := 1.0
-	if params.Temperature != 0 {
-		temp = params.Temperature
+	temp := entry.Temperature
+	if temp == 0 {
+		temp = 0.8
 	}
-	topP := 1.0
-	if params.TopP != 0 {
-		topP = params.TopP
+	topP := entry.TopP
+	if topP == 0 {
+		topP = 0.95
 	}
-	maxOut := DefaultResponseLen
-	if params.ResponseLength != 0 {
-		maxOut = params.ResponseLength
-	} else if params.MaxTokens != 0 {
-		maxOut = params.MaxTokens
+	maxOut := entry.MaxTokens
+	if maxOut == 0 {
+		maxOut = 16000
 	}
-
-	presPenalty := params.PresencePenalty
-	if presPenalty == 0 {
-		presPenalty = 0.5
-	}
-	freqPenalty := params.FrequencyPenalty
-	if freqPenalty == 0 {
-		freqPenalty = 0.2
-	}
-	minP := params.MinP
-	if minP == 0 {
-		minP = 0.03
-	}
-	repPenalty := params.RepetitionPenalty
-	if repPenalty == 0 {
-		repPenalty = 1.10
-	}
+	presPenalty := entry.PresencePenalty
+	freqPenalty := entry.FrequencyPenalty
 
 	return byok.OpenAICompatRequest{
-		Model:             model,
-		Messages:          openaiMessages,
-		Temperature:       &temp,
-		MaxTokens:         &maxOut,
-		TopP:              &topP,
-		PresencePenalty:   &presPenalty,
-		FrequencyPenalty:  &freqPenalty,
-		MinP:              &minP,
-		RepetitionPenalty: &repPenalty,
-		Stop:              params.Stop,
+		Model:            entry.Model,
+		Messages:         openaiMessages,
+		Temperature:      &temp,
+		MaxTokens:        &maxOut,
+		TopP:             &topP,
+		PresencePenalty:  &presPenalty,
+		FrequencyPenalty: &freqPenalty,
 	}
 }
 
@@ -150,7 +138,7 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 		}
 	}
 
-	reqPayload := buildOpenAIRequest(messages, entry.Model, params)
+	reqPayload := buildOpenAIRequest(messages, entry)
 	openaiResp, code, err := byok.CallOpenAI(apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
 	if err != nil {
 		pings = append(pings, PingLog{

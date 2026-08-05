@@ -28,9 +28,14 @@ type ProviderConfig struct {
 }
 
 type ChainEntry struct {
-	Provider string
-	Model    string
-	Config   ProviderConfig
+	Provider         string
+	Model            string
+	Config           ProviderConfig
+	Temperature      float64
+	TopP             float64
+	MaxTokens        int
+	PresencePenalty  float64
+	FrequencyPenalty float64
 }
 
 type SystemAIChatParams struct {
