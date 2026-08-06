@@ -24,7 +24,7 @@
 | Cache & Queue | Redis 7 (go-redis v9) | Rate limiting, job queue, chat result store, cooldowns |
 | Object Storage | MinIO v7 (S3-compatible) | Bot avatar/image storage |
 | Image CDN | Cloudinary v2 | Image URL transformation/caching |
-| Auth | golang-jwt v5 (HS256) | Stateless authentication |
+| Auth | golang-jwt v5 (HS256) & Google Oauth2 | Stateless authentication |
 | Encryption | AES-256-CBC + HMAC-SHA256 (custom crypto) | BYOK API key encryption (Laravel-compatible) |
 | Email | gomail v2 (SMTP/Brevo) | OTP verification emails |
 | Scheduler | robfig/cron v3 | Periodic jobs (unban, story gen, analytics) |
@@ -162,6 +162,7 @@ func Connect()  // opens MySQL with utf8mb4, plural table naming
 | `UserActivity` | `user_activities` | Analytics tracking |
 | `EmailVerificationOtp` | — | Email OTP store |
 | `PasswordResetToken` | `password_reset_tokens` | Password reset |
+| `UserOauth` | `user_oauths` | Google Oauth |
 
 **Domain Logic in Models**: `UserBotBond` contains significant domain logic:
 - `GetLevel()` — cubic XP curve with O(1) initial guess + refinement

@@ -1,14 +1,17 @@
 package routes
 
 import (
-	"halostory_go_backend/internal/app/http/controllers/auth"
-	apiControllers "halostory_go_backend/internal/app/http/controllers/api"
-	byokControllers "halostory_go_backend/internal/app/http/controllers/api/byok"
-	"halostory_go_backend/internal/app/http/middlewares"
-	"halostory_go_backend/internal/app/models"
 	"net/http"
 
+	apiControllers "halostory_go_backend/internal/app/http/controllers/api"
+	byokControllers "halostory_go_backend/internal/app/http/controllers/api/byok"
+	"halostory_go_backend/internal/app/http/controllers/auth"
+	"halostory_go_backend/internal/app/http/middlewares"
+	"halostory_go_backend/internal/app/models"
+	"halostory_go_backend/internal/services"
+
 	"github.com/gin-gonic/gin"
+	"golang.org/x/oauth2"
 )
 
 // SetupAPI mendaftarkan semua route untuk aplikasi
@@ -35,6 +38,37 @@ func SetupAPI(r *gin.Engine) {
 	api.GET("/v1/get-call", middlewares.CheckStaticToken(), apiControllers.GetCall)
 	api.POST("/register", auth.Register)
 
+	// Google OAUTH2 ( Dari Flutter kirim Auth code + verifier )
+	api.POST("/auth/google/exchange", middlewares.CheckStaticToken(), auth.AuthorizationCode)
+
+
+
+	// ################################################################
+	// Buat tes development aja
+	// Gak dipake
+	// Gak punya sdk flutter nya rek, android studio berat cuy
+	api.GET("/auth/google/callback", func(c *gin.Context) {
+		code := c.Query("code")
+
+		c.JSON(200, gin.H{
+			"authorization_code": code,
+			"device_id": "dummy_id",
+		})
+	})
+	api.GET("/auth/google", func(c *gin.Context) {
+		url := services.GOOGLE_OAUTH.AuthCodeURL(
+			"random-state",
+			oauth2.AccessTypeOffline,
+			oauth2.ApprovalForce,
+		)
+
+		c.Redirect(302, url)
+	})
+	// ################################################################
+
+
+
+
 	// Password Reset Routes (Public)
 	api.POST("/forgot-password", auth.ForgotPassword)
 	api.POST("/reset-password", auth.ResetPassword)
@@ -59,6 +93,12 @@ func SetupAPI(r *gin.Engine) {
 	// Backup Routes (no email verification required — same as Laravel)
 	protected.POST("/user/backup", apiControllers.BackupStore)
 	protected.GET("/user/restore", apiControllers.BackupRestore)
+
+	// Cek Apakah User ini Sudah Set Password Atau Belum ( Untuk Endpoint Ubah Password Nanti )
+	// Supaya bisa Hilang / Munculkan Input Current Password yang Opsional Untuk Login Google ( kalo belum punya akun biasa )
+	// Atau memeriksa apakah akun user terkait dengan akun google
+	protected.GET("/user/has_local_password", auth.CheckHasLocalPassword)
+	protected.GET("/user/has_google_auth", auth.CheckHasLocalPassword)
 
 	// User Profile Routes (no email verification required — same as Laravel)
 	protected.POST("/user/update-email", auth.UpdateEmail)
@@ -100,6 +140,9 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)
 		verified.POST("/ai/summarize", apiControllers.Summarize)
 		verified.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
+
+		// ─── Call ( WEBRTC ) - Belum di Implementasi ───
+		// verified.GET("")
 
 		// ─── BYOK Chat Status (shared polling) ───
 		verified.GET("/chat/status/:uuid", byokControllers.ChatStatus)

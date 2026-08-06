@@ -1,7 +1,16 @@
-.PHONY: dev build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs docker-worker-up docker-worker-down docker-worker-logs docker-worker-build
+.PHONY: dev dev-win dev-win-worker build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs docker-worker-up docker-worker-down docker-worker-logs docker-worker-build
 
 dev:
 	air
+
+dev-win:
+	go run ./cmd/server/main.go
+
+dev-win-worker:
+	go run ./cmd/worker/main.go
+
+dev-win-air:
+	air -c .air.windows.toml
 
 build-server:
 	go build -o ./tmp/server ./cmd/server

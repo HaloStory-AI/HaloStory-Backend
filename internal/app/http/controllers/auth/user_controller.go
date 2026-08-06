@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // ───────────────────── Forgot Password ─────────────────────
@@ -128,9 +131,9 @@ func ResetPassword(c *gin.Context) {
 	})
 }
 
-// ───────────────────── Update Email ─────────────────────
+// ───────────────────── Update Picture ─────────────────────
 
-func UpdateEmail(c *gin.Context) {
+func UpdatePicture(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email" form:"email" binding:"required,email,max=255"`
 		Password string `json:"password" form:"password" binding:"required"`
@@ -180,6 +183,79 @@ func UpdateEmail(c *gin.Context) {
 	})
 }
 
+// ───────────────────── Update Email ─────────────────────
+
+func UpdateEmail(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email" form:"email" binding:"required,email,max=255"`
+		Password string `json:"password" form:"password"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
+		return
+	}
+
+	if strings.TrimSpace(req.Email) == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The email field is required.",
+			"errors": gin.H{
+				"email": []string{"The email field is required."},
+			},
+		})
+		return
+	}
+
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
+
+	var count int64
+	database.DB.Model(&models.User{}).Where("email = ? AND id != ?", req.Email, user.ID).Count(&count)
+	if count > 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "The email has already been taken.",
+			"errors": gin.H{
+				"email": []string{"The email has already been taken."},
+			},
+		})
+		return
+	}
+
+	var userOAuth models.UserOAuth
+
+	// Ambil data `has_local_password` default false
+	err := database.DB.Where("provider = ? AND user_id = ?", "google", user.ID).Select("has_local_password", "user_id").First(&userOAuth).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// User belum pernah login google
+		// log.Println("[DEBUG] User belum pernah login google")
+		// Berarti update password harus ada current passwordnya, alias has_local_password true
+		userOAuth.HasLocalPassword = true
+	} else if err != nil {
+		// Error
+		log.Println("[ERROR] Error database: " + err.Error())
+	} else {
+		// User sudah pernah login google, maka hapus kaitannya.
+		// Kalo hapus, user harus kaitkan ulang ke akun google di pengaturan aplikasi.
+		// Kalo dikatikannya di screen login, maka harus login dengan email yang baru itu, jangan yang lama.
+		// Karena kalo yang lama, system akan tetap login sebagai email lama.
+		// Satu satunya cara untuk mengaitkan otomatis, yaitu pergi ke Pengaturan > backup dan tekan tombol Hubungkan ke Google ( Jika Ada )
+		database.DB.Where("user_id = ?", user.ID).Delete(&models.UserOAuth{})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil && userOAuth.HasLocalPassword {
+		c.JSON(http.StatusForbidden, gin.H{
+			"message": "Invalid password",
+		})
+		return
+	}
+
+	database.DB.Model(&user).Update("email", req.Email)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Email updated successfully",
+	})
+}
+
 // ───────────────────── Update Name ─────────────────────
 
 func UpdateName(c *gin.Context) {
@@ -217,7 +293,7 @@ func UpdateName(c *gin.Context) {
 
 func UpdatePassword(c *gin.Context) {
 	var req struct {
-		CurrentPassword    string `json:"current_password" binding:"required"`
+		CurrentPassword    string `json:"current_password"`
 		NewPassword        string `json:"new_password" binding:"required,min=8"`
 		NewPasswordConfirm string `json:"new_password_confirmation"`
 	}
@@ -239,12 +315,32 @@ func UpdatePassword(c *gin.Context) {
 
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)
+	var userOAuth models.UserOAuth
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil {
+	// Ambil data `has_local_password` default false
+	err := database.DB.Where("provider = ? AND user_id = ?", "google", user.ID).Select("has_local_password", "user_id").First(&userOAuth).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// User belum pernah login google
+		// log.Println("[DEBUG] User belum pernah login google")
+		// Berarti update password harus ada current passwordnya, alias has_local_password true
+		userOAuth.HasLocalPassword = true
+	} else if err != nil {
+		// Error
+		log.Println("[ERROR] Error database: " + err.Error())
+	} else {
+		// User sudah pernah login google
+		// log.Println("[DEBUG] User sudah pernah login google")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.CurrentPassword)); err != nil && userOAuth.HasLocalPassword {
 		c.JSON(http.StatusForbidden, gin.H{
 			"message": "Invalid current password",
 		})
 		return
+	}
+
+	if !userOAuth.HasLocalPassword {
+		database.DB.Model(&models.UserOAuth{}).Where("user_id = ?", userOAuth.UserID).Update("has_local_password", true)
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
@@ -338,5 +434,29 @@ func ReportBannedDevice(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Device reported.",
+	})
+}
+
+func CheckHasLocalPassword(c *gin.Context) {
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
+	var userOAuth models.UserOAuth
+
+	// Ambil data `has_local_password` default false
+	err := database.DB.Where("provider = ? AND user_id = ?", "google", user.ID).Select("has_local_password", "user_id").First(&userOAuth).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// User belum pernah login google
+		// Berarti update password harus ada current passwordnya, alias has_local_password true
+		userOAuth.HasLocalPassword = true
+	} else if err != nil {
+		// Error
+		log.Println("[ERROR] Error database: " + err.Error())
+	} else {
+		// User sudah pernah login google
+		// log.Println("[DEBUG] User sudah pernah login google")
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"has_local_password": userOAuth.HasLocalPassword,
 	})
 }

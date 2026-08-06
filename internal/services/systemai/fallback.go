@@ -3,6 +3,7 @@ package systemai
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/services/byok"
@@ -118,7 +119,7 @@ func extractContent(m map[string]interface{}) string {
 	return content
 }
 
-func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
+func RunFallbackChain(httpClient *http.Client,messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
 	chain := buildChain(isVip)
 	entry := chain[0]
 
@@ -139,7 +140,7 @@ func RunFallbackChain(messages []byok.Message, params *SystemAIChatParams, isVip
 	}
 
 	reqPayload := buildOpenAIRequest(messages, entry)
-	openaiResp, code, err := byok.CallOpenAI(apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
+	openaiResp, code, err := byok.CallOpenAI(httpClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
 	if err != nil {
 		pings = append(pings, PingLog{
 			Provider: entry.Provider,

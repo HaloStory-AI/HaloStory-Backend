@@ -55,7 +55,7 @@ type OpenAIRequestOptions struct {
 	ExtraBody    map[string]interface{} `json:"extra_body,omitempty"`
 }
 
-func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, timeout time.Duration, opts *OpenAIRequestOptions) (*OpenAICompatResponse, int, error) {
+func CallOpenAI(httpClient *http.Client, apiKey, baseURL, model string, payload OpenAICompatRequest, timeout time.Duration, opts *OpenAIRequestOptions) (*OpenAICompatResponse, int, error) {
 	endpoint := baseURL
 	if !strings.Contains(endpoint, "/chat/completions") {
 		endpoint = strings.TrimRight(endpoint, "/") + "/chat/completions"
@@ -101,8 +101,7 @@ func CallOpenAI(apiKey, baseURL, model string, payload OpenAICompatRequest, time
 		}
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("request failed: %w", err)
 	}

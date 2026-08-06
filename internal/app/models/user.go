@@ -9,6 +9,7 @@ type User struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
 	Name            string     `json:"name"`
 	Persona         *string    `json:"persona"`
+	// Picture         string     `json:"picture"`
 	Email           string     `json:"email"`
 	EmailVerifiedAt *time.Time `json:"email_verified_at"`
 	Password        string     `json:"-"` // disembunyikan dari JSON response

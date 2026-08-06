@@ -65,6 +65,8 @@ type reasoningConfig struct {
 	Exclude   bool    `json:"exclude,omitempty"`
 }
 
+var httpClient = utils.NewAIHttpClient()
+
 func isSystemAIJob(data []byte) bool {
 	var p struct {
 		Provider string `json:"provider"`
@@ -114,15 +116,17 @@ func main() {
 	database.Connect()
 	services.InitRedis()
 
-	maxWorkers := 30
+	// maxWorkersBYOK := 30
+	maxWorkersBYOK := 100
+	maxWorkersSystem := 20
 	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			maxWorkers = n
+			maxWorkersBYOK = n
 		}
 	}
-	mainSem := make(chan struct{}, maxWorkers)
-	sysSem := make(chan struct{}, 6)
-	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: 6 (free), VIP routed to BYOK pool", maxWorkers)
+	mainSem := make(chan struct{}, maxWorkersBYOK)
+	sysSem := make(chan struct{}, maxWorkersSystem)
+	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: %d (free), VIP routed to BYOK pool", maxWorkersBYOK, maxWorkersSystem)
 
 	go func() {
 		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -631,7 +635,7 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 	}
 
 	start := time.Now()
-	result := systemai.RunFallbackChain(messages, params, isVip)
+	result := systemai.RunFallbackChain(httpClient, messages, params, isVip)
 	log.Printf("Worker: System AI chain for %s took %v, success=%v", uuid, time.Since(start), result.Error == "")
 
 	if result.Error != "" {
@@ -703,7 +707,7 @@ func handleSystemAISummarization(uuid, storeKey string, data chatData, messages 
 	}
 
 	start := time.Now()
-	result := systemai.RunFallbackChain(promptMessages, params, isVip)
+	result := systemai.RunFallbackChain(httpClient, promptMessages, params, isVip)
 	log.Printf("Worker: System AI summarization for %s took %v, success=%v", uuid, time.Since(start), result.Error == "")
 
 	if result.Error != "" {
@@ -720,7 +724,7 @@ func handleSystemAISummarization(uuid, storeKey string, data chatData, messages 
 		log.Printf("Worker: System AI summary content empty for %s, retrying with lower temperature", uuid)
 		params.Temperature = 0.3
 		params.IsSummarize = true
-		result2 := systemai.RunFallbackChain(promptMessages, params, isVip)
+		result2 := systemai.RunFallbackChain(httpClient, promptMessages, params, isVip)
 		if result2.Error == "" {
 			rawContent = strings.TrimSpace(result2.Content)
 			summary, memories = byok.ParseSummaryResponse(rawContent)
@@ -1086,7 +1090,7 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		}
 	}
 
-	openaiResp, statusCode, err := byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
+	openaiResp, statusCode, err := byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
 	if err != nil {
 		log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
 		markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
@@ -1175,7 +1179,7 @@ func handleOpenAISummarization(uuid, storeKey string, data chatData, decryptedKe
 		}
 	}
 
-	openaiResp, statusCode, err := byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 60*time.Second, sumOpts)
+	openaiResp, statusCode, err := byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 60*time.Second, sumOpts)
 	if err != nil {
 		log.Printf("Worker: OpenAI summarization API error for %s: %v (status %d)", uuid, err, statusCode)
 		errMsg := err.Error()
@@ -1197,7 +1201,7 @@ func handleOpenAISummarization(uuid, storeKey string, data chatData, decryptedKe
 		log.Printf("Worker: OpenAI summary content empty for %s, retrying with lower temperature", uuid)
 		temp = 0.3
 		reqPayload.Temperature = &temp
-		openaiResp, statusCode, err = byok.CallOpenAI(decryptedKey, baseURL, model, reqPayload, 60*time.Second, sumOpts)
+		openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 60*time.Second, sumOpts)
 		if err == nil && len(openaiResp.Choices) > 0 {
 			rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
 			summary, memories = byok.ParseSummaryResponse(rawContent)

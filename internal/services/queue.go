@@ -46,7 +46,8 @@ func Dequeue(queueName string, timeout time.Duration) (string, []byte, error) {
 
 func StoreChatResult(uuid string, result []byte, ttl time.Duration) error {
 	key := fmt.Sprintf("chat:%s", uuid)
-	return RedisClient.SetEx(RedisCtx, key, string(result), ttl).Err()
+	// return RedisClient.SetEx(RedisCtx, key, string(result), ttl).Err()
+	return RedisClient.Set(RedisCtx, key, string(result), ttl).Err()
 }
 
 func GetChatResult(uuid string) ([]byte, error) {
@@ -59,6 +60,7 @@ func DeleteChatResult(uuid string) error {
 	return RedisClient.Del(RedisCtx, key).Err()
 }
 
+// redis.call('SETEX', KEYS[1], ARGV[4], cjson.encode(payload))
 const updateStatusScript = `
 local data = redis.call('GET', KEYS[1])
 if not data then return nil end
@@ -68,7 +70,7 @@ if ARGV[2] ~= '' then
 	payload['response'] = cjson.decode(ARGV[2])
 	payload['status_code'] = tonumber(ARGV[3])
 end
-redis.call('SETEX', KEYS[1], ARGV[4], cjson.encode(payload))
+redis.call('SET', KEYS[1], cjson.encode(payload), 'EX', ARGV[4])
 return "OK"
 `
 

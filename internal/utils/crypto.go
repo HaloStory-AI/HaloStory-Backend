@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/big"
 	"strings"
 
 	"halostory_go_backend/internal/config"
@@ -159,4 +161,47 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 		return nil, errors.New("invalid padding")
 	}
 	return data[:len(data)-padding], nil
+}
+
+func GenerateRandomPassword(length int) (string, error) {
+	const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	const lowercase = "abcdefghijklmnopqrstuvwxyz"
+	const digits = "0123456789"
+	const symbols = "!@#$%^&*()-_=+[]{}|;:,.<>?"
+
+	const allChars = uppercase + lowercase + digits + symbols
+
+	if length < 4 {
+		return "", fmt.Errorf("panjang password minimal 4 karakter")
+	}
+
+	password := make([]byte, length)
+
+	categories := []string{uppercase, lowercase, digits, symbols}
+	for i, category := range categories {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(category))))
+		if err != nil {
+			return "", err
+		}
+		password[i] = category[num.Int64()]
+	}
+
+	for i := 4; i < length; i++ {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(allChars))))
+		if err != nil {
+			return "", err
+		}
+		password[i] = allChars[num.Int64()]
+	}
+
+	for i := range password {
+		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(len(password))))
+		if err != nil {
+			return "", err
+		}
+		j := jBig.Int64()
+		password[i], password[j] = password[j], password[i]
+	}
+
+	return string(password), nil
 }

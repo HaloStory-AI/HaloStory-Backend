@@ -32,6 +32,9 @@ func main() {
 	// Koneksi ke Redis
 	services.InitRedis()
 
+	// Setup Google OAUTH2
+	services.InitGoogleAuthorization()
+
 	// Set Gin mode (default release — set GIN_MODE=debug di .env untuk dev)
 	gin.SetMode(config.Env("GIN_MODE", "release"))
 
@@ -46,7 +49,11 @@ func main() {
 
 	// Route dasar untuk memastikan server berjalan
 	r.GET("/", func(c *gin.Context) {
-		c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
+		// c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
+		c.JSON(200, gin.H{
+			"success": true,
+			"message": "Halo dari Gin! Routing terpisah berhasil.",
+		})
 	})
 
 	r.GET("/up", func(c *gin.Context) {
@@ -56,7 +63,7 @@ func main() {
 			defer resp.Body.Close()
 			body, _ := io.ReadAll(resp.Body)
 			var data struct {
-				Status            string `json:"status"`
+				Status             string `json:"status"`
 				MaintenanceMessage string `json:"maintenance_message"`
 			}
 			if json.Unmarshal(body, &data) == nil && data.Status == "active" {
@@ -74,5 +81,5 @@ func main() {
 	})
 
 	// Jalankan server di port 3000
-	log.Fatal(r.Run(":3000"))
+	log.Fatal(r.Run("0.0.0.0:3000"))
 }

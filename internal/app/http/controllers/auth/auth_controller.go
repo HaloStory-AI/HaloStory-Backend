@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -17,11 +18,204 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type LoginRequest struct {
 	Email    string `json:"email" form:"email" binding:"required,email"`
 	Password string `json:"password" form:"password" binding:"required"`
+}
+
+type RegisterRequest struct {
+	Name                 string `json:"name" form:"name" binding:"required,max=255"`
+	Email                string `json:"email" form:"email" binding:"required,email,max=255"`
+	Password             string `json:"password" form:"password" binding:"required,min=8"`
+	PasswordConfirmation string `json:"password_confirmation" form:"password_confirmation"`
+	DeviceID             string `json:"device_id" form:"device_id"`
+}
+
+type GAuthorizationCodeRequest struct {
+	AuthorizationCode string `json:"authorization_code" form:"authorization_code" binding:"required,min=1"`
+	// CodeVerifier      string `json:"code_verifier" form:"code_verifier" binding:"required,min=1"`
+	DeviceID          string `json:"device_id" form:"device_id" binding:"required,min=1"`
+}
+
+func AuthorizationCode(c *gin.Context) {
+	allowed, retryAfter, err := services.RateLimit("auth.oauth:"+c.ClientIP(), 5, 15*time.Minute)
+	if err == nil && !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":     "Too many attempts. Please try again later.",
+			"retry_after": retryAfter,
+		})
+		return
+	}
+
+	var authRequest GAuthorizationCodeRequest
+	if err := c.ShouldBind(&authRequest); err != nil {
+		status, resp := formatValidationErrors(err)
+		c.JSON(status, resp)
+		return
+	}
+
+	token, err := services.ExchangeCode(
+		c.Request.Context(),
+		authRequest.AuthorizationCode,
+		// authRequest.CodeVerifier,
+	)
+
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	identity, err := services.GetGoogleIdentity(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// Cek apakah device_id dibanned
+	if authRequest.DeviceID != "" {
+		var deviceBan models.DeviceBan
+		if err := database.DB.Where("device_id = ?", authRequest.DeviceID).First(&deviceBan).Error; err == nil {
+			c.JSON(http.StatusForbidden, gin.H{
+				"message": "Perangkat ini telah dibanned. Tidak dapat mendaftar.",
+			})
+			return
+		}
+	}
+
+	var userOAuth models.UserOAuth
+	var user models.User
+	var hasLocalPassword bool
+
+	// Apakah user sudah pernah login google?
+	err = database.DB.Where("provider = ? AND provider_user_id = ?", "google", identity.ID).First(&userOAuth).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// User belum pernah login pake google oauth
+		// log.Println("[DEBUG] User belum pernah login pake google oauth")
+
+		errUser := database.DB.Where("email = ?", identity.Email).First(&user).Error
+		if errors.Is(errUser, gorm.ErrRecordNotFound) {
+			// User belum pernah login gooogle dan belum pernah register biasa
+			// log.Println("[DEBUG] User belum pernah login gooogle dan belum pernah register biasa")
+
+			randomPassword, _ := utils.GenerateRandomPassword(8)
+			// Hash password
+			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(randomPassword), bcrypt.DefaultCost)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"message": "Gagal mengenkripsi password",
+				})
+				return
+			}
+
+			// Buat user baru dengan default role 'Sensei'
+			user = models.User{
+				Name:  identity.Name,
+				Email: identity.Email,
+				// Pake password random dulu, karena login google langsung
+				// Ntar bisa diganti di setting profile
+				// Tanpa input password lama ( Karena dianggap belum pernah set Password )
+				Password: string(hashedPassword),
+				Role:     "Sensei",
+				EmailVerifiedAt: func() *time.Time {
+					t := time.Now()
+					return &t
+				}(),
+			}
+
+			// Simpan ke database
+			if err = database.DB.Create(&user).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"message": "Gagal mendaftarkan user",
+				})
+				return
+			}
+
+			// User belum punya password ( Masih acak dari login google )
+			// karena belum punya akun biasa
+			hasLocalPassword = false
+		} else if errUser != nil {
+			// Error pada database
+			// log.Println("[ERROR] Error: " + errUser.Error())
+		} else {
+			// Belum login akun google tapi pernah register biasa
+			// log.Println("[DEBUG] Belum login akun google tapi pernah register biasa")
+
+			// User sudah punya password, karena sudah punya akun biasa
+			hasLocalPassword = true
+		}
+
+		userOAuth = models.UserOAuth{
+			UserID:           user.ID,
+			Provider:         "google",
+			ProviderUserID:   identity.ID,
+			RefreshToken:     token.RefreshToken,
+			HasLocalPassword: hasLocalPassword,
+		}
+
+		if err := database.DB.Create(&userOAuth).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"message": "Gagal mendaftarkan user",
+			})
+			return
+		}
+	} else if err != nil {
+		// Error database
+		log.Println("[ERROR] Error: " + err.Error())
+	} else {
+		// User sudah pernah login pake google oauth
+		// log.Println("[DEBUG] User sudah pernah login pake google oauth")
+
+		if token.RefreshToken != "" {
+			database.DB.Model(&models.UserOAuth{}).Where("provider_user_id = ?", identity.ID).Update("refresh_token", token.RefreshToken)
+		}
+
+		// Cari user berdasarkan email dan simpan di `user`
+		result := database.DB.Where("email = ?", identity.Email).First(&user)
+		if result.Error != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"message": "Email belum terdaftar",
+			})
+			return
+		}
+	}
+
+	// Cek apakah user sedang dibanned
+	if user.HasActiveBan() {
+		var bannedUntilStr *string
+		if user.BannedUntil != nil {
+			str := user.BannedUntil.Format("2006-01-02T15:04:05Z07:00") // Format RFC3339
+			bannedUntilStr = &str
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{
+			"message":      "Akun Anda telah dibanned.",
+			"reason":       user.BanReason,
+			"banned_until": bannedUntilStr,
+		})
+		return
+	}
+
+	tokenString, err := utils.GenerateJWT(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Gagal membuat token autentikasi",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": tokenString,
+		"token_type":   "Bearer",
+		"user":         user,
+		"has_local_password": hasLocalPassword,
+	})
 }
 
 func Login(c *gin.Context) {
@@ -92,15 +286,8 @@ func Login(c *gin.Context) {
 		"access_token": tokenString,
 		"token_type":   "Bearer",
 		"user":         user,
+		"has_local_password": true,
 	})
-}
-
-type RegisterRequest struct {
-	Name                 string `json:"name" form:"name" binding:"required,max=255"`
-	Email                string `json:"email" form:"email" binding:"required,email,max=255"`
-	Password             string `json:"password" form:"password" binding:"required,min=8"`
-	PasswordConfirmation string `json:"password_confirmation" form:"password_confirmation"`
-	DeviceID             string `json:"device_id" form:"device_id"`
 }
 
 func formatValidationErrors(err error) (int, gin.H) {
@@ -123,6 +310,8 @@ func formatValidationErrors(err error) (int, gin.H) {
 			"NewPassword":          "new_password",
 			"NewPasswordConfirm":   "new_password_confirmation",
 			"Persona":              "persona",
+			"AuthorizationCode":    "authorization_code",
+			"CodeVerifier":         "code_verifier",
 		}
 
 		errs := make(map[string][]string)
@@ -286,5 +475,6 @@ func Register(c *gin.Context) {
 		"access_token": tokenString,
 		"token_type":   "Bearer",
 		"user":         user,
+		"has_local_password": true,
 	})
 }
