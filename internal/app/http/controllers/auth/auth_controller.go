@@ -44,7 +44,10 @@ type RegisterRequest struct {
 type GAuthorizationCodeRequest struct {
 	AuthorizationCode string `json:"authorization_code" form:"authorization_code" binding:"required,min=1"`
 	// CodeVerifier      string `json:"code_verifier" form:"code_verifier" binding:"required,min=1"`
-	DeviceID string `json:"device_id" form:"device_id" binding:"required,min=1"`
+	DeviceID     string `json:"device_id" form:"device_id" binding:"required,min=1"`
+	RedirectURI  string `json:"redirect_uri" form:"redirect_uri"`
+	ClientID     string `json:"client_id" form:"client_id"`
+	ClientSecret string `json:"client_secret" form:"client_secret"`
 }
 
 func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
@@ -64,11 +67,21 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 		return
 	}
 
-	token, err := services.ExchangeCode(
-		c.Request.Context(),
-		authRequest.AuthorizationCode,
-		// authRequest.CodeVerifier,
-	)
+	var token *oauth2.Token
+	if authRequest.RedirectURI != "" && authRequest.ClientID != "" {
+		token, err = services.ExchangeCodeCustom(
+			c.Request.Context(),
+			authRequest.AuthorizationCode,
+			authRequest.ClientID,
+			authRequest.ClientSecret,
+			authRequest.RedirectURI,
+		)
+	} else {
+		token, err = services.ExchangeCode(
+			c.Request.Context(),
+			authRequest.AuthorizationCode,
+		)
+	}
 
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -169,11 +182,16 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 			hasLocalPassword = true
 		}
 
+		storedRefreshToken := token.RefreshToken
+		if token.RefreshToken != "" && authRequest.ClientID != "" {
+			storedRefreshToken = fmt.Sprintf("%s|%s|%s", token.RefreshToken, authRequest.ClientID, authRequest.ClientSecret)
+		}
+
 		userOAuth = models.UserOAuth{
 			UserID:           user.ID,
 			Provider:         "google",
 			ProviderUserID:   identity.ID,
-			RefreshToken:     token.RefreshToken,
+			RefreshToken:     storedRefreshToken,
 			HasLocalPassword: hasLocalPassword,
 		}
 
@@ -191,7 +209,11 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 		// log.Println("[DEBUG] User sudah pernah login pake google oauth")
 
 		if token.RefreshToken != "" {
-			database.DB.Model(&models.UserOAuth{}).Where("provider_user_id = ?", identity.ID).Update("refresh_token", token.RefreshToken)
+			storedRefreshToken := token.RefreshToken
+			if authRequest.ClientID != "" {
+				storedRefreshToken = fmt.Sprintf("%s|%s|%s", token.RefreshToken, authRequest.ClientID, authRequest.ClientSecret)
+			}
+			database.DB.Model(&models.UserOAuth{}).Where("provider_user_id = ?", identity.ID).Update("refresh_token", storedRefreshToken)
 		}
 
 		// Cari user berdasarkan email dan simpan di `user`

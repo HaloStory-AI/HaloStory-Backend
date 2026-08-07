@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -68,6 +69,50 @@ func ExchangeCode(ctx context.Context, code string) (*oauth2.Token, error) {
 	)
 }
 
+func ExchangeCodeCustom(ctx context.Context, code, clientID, clientSecret, redirectURL string) (*oauth2.Token, error) {
+	config := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		RedirectURL:  redirectURL,
+		Scopes: []string{
+			"openid",
+			"email",
+			"profile",
+			"https://www.googleapis.com/auth/drive.appdata",
+			"https://www.googleapis.com/auth/drive.file",
+		},
+		Endpoint: oauth2.Endpoint{
+			AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+			TokenURL: "https://oauth2.googleapis.com/token",
+		},
+	}
+	return config.Exchange(ctx, code)
+}
+
+func GetOAuthClient(ctx context.Context, token *oauth2.Token) *http.Client {
+	if strings.Contains(token.RefreshToken, "|") {
+		parts := strings.Split(token.RefreshToken, "|")
+		realToken := parts[0]
+		clientID := parts[1]
+		clientSecret := parts[2]
+
+		config := &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+				TokenURL: "https://oauth2.googleapis.com/token",
+			},
+		}
+		tempToken := &oauth2.Token{
+			RefreshToken: realToken,
+		}
+		return config.Client(ctx, tempToken)
+	}
+
+	return GOOGLE_OAUTH.Client(ctx, token)
+}
+
 func GetTokenOauthFromDB(user_id uint) (oauth2.Token, error) {
 	var userOauth models.UserOAuth
 	err := database.DB.Where("user_id = ?", user_id).First(&userOauth).Error
@@ -85,7 +130,7 @@ func getGoogleIdentityService(ctx context.Context, token *oauth2.Token) (*google
 		return nil, fmt.Errorf("GOOGLE_OAUTH belum di setup! periksa kembali env anda.")
 	}
 	
-	client := GOOGLE_OAUTH.Client(ctx, token)
+	client := GetOAuthClient(ctx, token)
 	oauth2Service, err := googleoauth2.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return nil, fmt.Errorf("gagal membuat google identity service: %w", err)
@@ -117,7 +162,7 @@ func getDriveService(ctx context.Context, token *oauth2.Token) (*drive.Service, 
 		return nil, fmt.Errorf("GOOGLE_OAUTH belum di-setup! periksa kembali env anda")
 	}
 
-	client := GOOGLE_OAUTH.Client(ctx, token)
+	client := GetOAuthClient(ctx, token)
 	driveService, err := drive.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
 		return nil, fmt.Errorf("gagal membuat drive service: %w", err)
