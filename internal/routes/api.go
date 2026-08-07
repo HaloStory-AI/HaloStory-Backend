@@ -38,8 +38,8 @@ func SetupAPI(r *gin.Engine) {
 	api.GET("/v1/get-call", middlewares.CheckStaticToken(), apiControllers.GetCall)
 	api.POST("/register", auth.Register)
 
-	// Google OAUTH2 ( Dari Flutter kirim Auth code + verifier )
-	api.POST("/auth/google/exchange", middlewares.CheckStaticToken(), auth.AuthorizationCode)
+	// Google OAUTH2 ( Dari Flutter kirim Auth code + device_id )
+	api.POST("/auth/google/exchange", middlewares.CheckStaticToken(), auth.AuthorizationCodeExchange)
 
 
 
@@ -86,6 +86,10 @@ func SetupAPI(r *gin.Engine) {
 		c.JSON(http.StatusOK, user)
 	})
 
+	// Sama kayak yang diatas, tapi ini untuk link akun dan wajib kirim JWT yang valid
+	// Google OAUTH2 LINK ( Dari Flutter kirim Auth code + device_id ) wajib kirim headers authorization
+	protected.POST("/auth/google/link", auth.AuthorizationCodeLink)
+
 	// Email Verification Routes (excluded from email verification check)
 	protected.POST("/email/send-verification-otp", auth.SendVerificationOtp)
 	protected.POST("/email/verify", auth.VerifyEmail)
@@ -94,11 +98,17 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/user/backup", apiControllers.BackupStore)
 	protected.GET("/user/restore", apiControllers.BackupRestore)
 
+	// Drive Backup Routes (no email verification required — same as Laravel)
+	protected.POST("/user/drive-backup", apiControllers.DriveBackupStore)
+	protected.POST("/user/drive-delete", apiControllers.DriveDeleteBackup)
+	protected.POST("/user/drive-download", apiControllers.DriveDownloadBackup)
+	protected.GET("/user/drive-list", apiControllers.DriveBackupList)
+
 	// Cek Apakah User ini Sudah Set Password Atau Belum ( Untuk Endpoint Ubah Password Nanti )
 	// Supaya bisa Hilang / Munculkan Input Current Password yang Opsional Untuk Login Google ( kalo belum punya akun biasa )
 	// Atau memeriksa apakah akun user terkait dengan akun google
 	protected.GET("/user/has_local_password", auth.CheckHasLocalPassword)
-	protected.GET("/user/has_google_auth", auth.CheckHasLocalPassword)
+	protected.GET("/user/has_google_auth", auth.CheckIsUserOauth)
 
 	// User Profile Routes (no email verification required — same as Laravel)
 	protected.POST("/user/update-email", auth.UpdateEmail)

@@ -21,6 +21,13 @@ import (
 	"gorm.io/gorm"
 )
 
+type AUTHTYPE = int
+
+const (
+	EXCHANGE AUTHTYPE = iota
+	LINK
+)
+
 type LoginRequest struct {
 	Email    string `json:"email" form:"email" binding:"required,email"`
 	Password string `json:"password" form:"password" binding:"required"`
@@ -37,11 +44,11 @@ type RegisterRequest struct {
 type GAuthorizationCodeRequest struct {
 	AuthorizationCode string `json:"authorization_code" form:"authorization_code" binding:"required,min=1"`
 	// CodeVerifier      string `json:"code_verifier" form:"code_verifier" binding:"required,min=1"`
-	DeviceID          string `json:"device_id" form:"device_id" binding:"required,min=1"`
+	DeviceID string `json:"device_id" form:"device_id" binding:"required,min=1"`
 }
 
-func AuthorizationCode(c *gin.Context) {
-	allowed, retryAfter, err := services.RateLimit("auth.oauth:"+c.ClientIP(), 5, 15*time.Minute)
+func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
+	allowed, retryAfter, err := services.RateLimit("auth.oauth:"+c.ClientIP(), 10, 15*time.Minute)
 	if err == nil && !allowed {
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"message":     "Too many attempts. Please try again later.",
@@ -84,6 +91,17 @@ func AuthorizationCode(c *gin.Context) {
 		if err := database.DB.Where("device_id = ?", authRequest.DeviceID).First(&deviceBan).Error; err == nil {
 			c.JSON(http.StatusForbidden, gin.H{
 				"message": "Perangkat ini telah dibanned. Tidak dapat mendaftar.",
+			})
+			return
+		}
+	}
+
+	if authType == LINK {
+		userVal, _ := c.Get("user")
+		user := userVal.(models.User)
+		if user.Email != identity.Email {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"message": "Gunakan akun google yang sama dengan akun anda sekarang.",
 			})
 			return
 		}
@@ -211,11 +229,19 @@ func AuthorizationCode(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": tokenString,
-		"token_type":   "Bearer",
-		"user":         user,
+		"access_token":       tokenString,
+		"token_type":         "Bearer",
+		"user":               user,
 		"has_local_password": hasLocalPassword,
 	})
+}
+
+func AuthorizationCodeExchange(c *gin.Context) {
+	AuthorizationCode(c, EXCHANGE)
+}
+
+func AuthorizationCodeLink(c *gin.Context) {
+	AuthorizationCode(c, LINK)
 }
 
 func Login(c *gin.Context) {
@@ -283,9 +309,9 @@ func Login(c *gin.Context) {
 
 	// Return JSON sesuai format yang diminta
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": tokenString,
-		"token_type":   "Bearer",
-		"user":         user,
+		"access_token":       tokenString,
+		"token_type":         "Bearer",
+		"user":               user,
 		"has_local_password": true,
 	})
 }
@@ -472,9 +498,9 @@ func Register(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": tokenString,
-		"token_type":   "Bearer",
-		"user":         user,
+		"access_token":       tokenString,
+		"token_type":         "Bearer",
+		"user":               user,
 		"has_local_password": true,
 	})
 }

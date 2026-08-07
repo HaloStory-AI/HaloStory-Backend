@@ -238,7 +238,7 @@ func UpdateEmail(c *gin.Context) {
 		// Kalo hapus, user harus kaitkan ulang ke akun google di pengaturan aplikasi.
 		// Kalo dikatikannya di screen login, maka harus login dengan email yang baru itu, jangan yang lama.
 		// Karena kalo yang lama, system akan tetap login sebagai email lama.
-		// Satu satunya cara untuk mengaitkan otomatis, yaitu pergi ke Pengaturan > backup dan tekan tombol Hubungkan ke Google ( Jika Ada )
+		// Harus pilih akun google sesuai dengan akun yang ada saat ini
 		database.DB.Where("user_id = ?", user.ID).Delete(&models.UserOAuth{})
 	}
 
@@ -458,5 +458,29 @@ func CheckHasLocalPassword(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"has_local_password": userOAuth.HasLocalPassword,
+	})
+}
+
+func CheckIsUserOauth(c *gin.Context) {
+	userVal, _ := c.Get("user")
+	user := userVal.(models.User)
+	var userOAuth models.UserOAuth
+	var hasGoogleAuth bool;
+
+	// Ambil data `has_local_password` default false
+	err := database.DB.Where("provider = ? AND user_id = ?", "google", user.ID).Select("has_local_password", "user_id").First(&userOAuth).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// User belum pernah login google
+		hasGoogleAuth = false
+	} else if err != nil {
+		// Error
+		log.Println("[ERROR] Error database: " + err.Error())
+	} else {
+		// User sudah pernah login google
+		hasGoogleAuth = true
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"has_google_auth": hasGoogleAuth,
 	})
 }

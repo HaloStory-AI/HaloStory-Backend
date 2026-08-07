@@ -118,7 +118,7 @@ func main() {
 
 	// maxWorkersBYOK := 30
 	maxWorkersBYOK := 100
-	maxWorkersSystem := 20
+	maxWorkersSystem := 30
 	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxWorkersBYOK = n

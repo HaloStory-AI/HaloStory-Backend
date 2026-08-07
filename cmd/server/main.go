@@ -81,5 +81,5 @@ func main() {
 	})
 
 	// Jalankan server di port 3000
-	log.Fatal(r.Run("0.0.0.0:3000"))
+	log.Fatal(r.Run(":3000"))
 }
