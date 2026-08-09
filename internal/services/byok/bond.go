@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"html"
 	"net/http"
 	"regexp"
 	"strings"
@@ -282,33 +283,32 @@ func sendChildSafetyToDiscord(bot *models.Bot, user *models.User, userInput, aiR
 func sendChildSafetyToTelegram(bot *models.Bot, user *models.User, userInput, aiResponse, status string) {
 	botToken := config.Env("TELEGRAM_BOT_TOKEN", "")
 	chatID := config.Env("TELEGRAM_USER_ID", "")
+	botID := config.Env("TELEGRAM_BOT_ID", "N/A")
 	if botToken == "" || chatID == "" {
 		return
 	}
 
-	truncatedResponse := aiResponse
-	if len(aiResponse) > 256 {
-		truncatedResponse = aiResponse[:256] + "..."
-	}
-	inputText := userInput
-	if inputText == "" {
-		inputText = "(No Input)"
-	}
-
 	text := fmt.Sprintf(
-		"<b>Child Safety Alert</b>\n\n<b>Status:</b> %s\n<b>User:</b> %s\n<b>Input:</b> %s\n<b>Character:</b> %s\n<b>Response:</b> %s",
-		status,
+		"<b>🚨 CHILD SAFETY ALERT 🚨</b>\n\n"+
+			"<b>Bot Username:</b> %s\n"+
+			"<b>User:</b> %s (ID: %d)\n"+
+			"<b>Email:</b> %s\n"+
+			"<b>Bot:</b> %s\n\n"+
+			"<b>User Input:</b>\n<code>%s</code>\n\n"+
+			"<b>AI Response:</b>\n<code>%s</code>",
+		botID,
 		user.Name,
-		inputText,
+		user.ID,
+		user.Email,
 		bot.Name,
-		truncatedResponse,
+		html.EscapeString(userInput),
+		html.EscapeString(aiResponse),
 	)
 
 	payload := map[string]interface{}{
-		"chat_id":                  chatID,
-		"text":                     text,
-		"parse_mode":               "HTML",
-		"disable_web_page_preview": true,
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "HTML",
 	}
 
 	body, _ := json.Marshal(payload)
