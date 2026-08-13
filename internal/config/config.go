@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -15,6 +16,20 @@ func Env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// EnvInt mengambil value dari environment variable sebagai int.
+// Jika kosong atau gagal diparse, mengembalikan fallback.
+func EnvInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if len(value) == 0 {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 // LoadConfig membaca file .env dan memasukkannya ke environment variable OS

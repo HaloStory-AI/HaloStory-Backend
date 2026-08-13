@@ -243,7 +243,7 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 		return
 	}
 
-	tokenString, err := utils.GenerateJWT(user.ID)
+	tokenString, refreshToken, err := issueTokens(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Gagal membuat token autentikasi",
@@ -253,9 +253,126 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":       tokenString,
+		"refresh_token":      refreshToken,
 		"token_type":         "Bearer",
 		"user":               user,
-		"has_local_password": hasLocalPassword,
+		"has_local_password": true,
+	})
+}
+
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refresh_token" form:"refresh_token" binding:"required"`
+}
+
+// Refresh menukar refresh token yang masih valid dengan pasangan access token
+// + refresh token baru (rotasi). Refresh token lama langsung di-revoke.
+func Refresh(c *gin.Context) {
+	allowed, retryAfter, err := services.RateLimit("auth.refresh:"+c.ClientIP(), 30, 15*time.Minute)
+	if err == nil && !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"message":     "Too many attempts. Please try again later.",
+			"retry_after": retryAfter,
+		})
+		return
+	}
+
+	var req RefreshTokenRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Refresh token wajib diisi",
+		})
+		return
+	}
+
+	hash := utils.HashToken(req.RefreshToken)
+
+	var rt models.RefreshToken
+	if err := database.DB.Where("token_hash = ?", hash).First(&rt).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message": "Refresh token tidak valid",
+		})
+		return
+	}
+
+	if rt.RevokedAt != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message": "Refresh token sudah tidak berlaku",
+		})
+		return
+	}
+
+	if time.Now().After(rt.ExpiresAt) {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message": "Refresh token sudah kedaluwarsa",
+		})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, rt.UserID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"message": "User tidak ditemukan",
+		})
+		return
+	}
+
+	if user.HasActiveBan() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"message": "Akun Anda telah dibanned.",
+		})
+		return
+	}
+
+	// Rotasi: buat pasangan token baru dulu, baru revoke token lama.
+	// Kalau pembuatan token baru gagal, token lama tidak di-revoke sehingga
+	// sesi user tidak hilang.
+	tokenString, refreshToken, err := issueTokens(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Gagal membuat token autentikasi",
+		})
+		return
+	}
+
+	now := time.Now()
+	if err := database.DB.Model(&models.RefreshToken{}).
+		Where("id = ?", rt.ID).
+		Update("revoked_at", now).Error; err != nil {
+		log.Println("[ERROR] Gagal revoke refresh token lama: " + err.Error())
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":  tokenString,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"user":          user,
+	})
+}
+
+type LogoutRequest struct {
+	RefreshToken string `json:"refresh_token" form:"refresh_token"`
+}
+
+// Logout menandai refresh token sebagai revoked. Membutuhkan access token valid
+// (protected), refresh token dikirim di body untuk di-revoke.
+func Logout(c *gin.Context) {
+	var req LogoutRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "Format request tidak valid",
+		})
+		return
+	}
+
+	if req.RefreshToken != "" {
+		hash := utils.HashToken(req.RefreshToken)
+		database.DB.Model(&models.RefreshToken{}).
+			Where("token_hash = ?", hash).
+			Update("revoked_at", time.Now())
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Berhasil keluar",
 	})
 }
 
@@ -322,7 +439,7 @@ func Login(c *gin.Context) {
 	}
 
 	// Generate JWT Token menggunakan APP_KEY dari .env
-	tokenString, err := utils.GenerateJWT(user.ID)
+	tokenString, refreshToken, err := issueTokens(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "Gagal membuat token autentikasi",
@@ -333,6 +450,7 @@ func Login(c *gin.Context) {
 	// Return JSON sesuai format yang diminta
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":       tokenString,
+		"refresh_token":      refreshToken,
 		"token_type":         "Bearer",
 		"user":               user,
 		"has_local_password": true,
@@ -512,7 +630,7 @@ func Register(c *gin.Context) {
 	SendOtp(user.Email)
 
 	// Generate JWT Token
-	tokenString, err := utils.GenerateJWT(user.ID)
+	tokenString, refreshToken, err := issueTokens(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"message": "User berhasil dibuat, tapi gagal generate token",
@@ -522,6 +640,7 @@ func Register(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":       tokenString,
+		"refresh_token":      refreshToken,
 		"token_type":         "Bearer",
 		"user":               user,
 		"has_local_password": true,

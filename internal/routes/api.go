@@ -38,6 +38,9 @@ func SetupAPI(r *gin.Engine) {
 	api.GET("/v1/get-call", middlewares.CheckStaticToken(), apiControllers.GetCall)
 	api.POST("/register", auth.Register)
 
+	// Token refresh (public) — menukar refresh token dengan access token baru
+	api.POST("/refresh", auth.Refresh)
+
 	// Google OAUTH2 ( Dari Flutter kirim Auth code + device_id )
 	api.POST("/auth/google/exchange", middlewares.CheckStaticToken(), auth.AuthorizationCodeExchange)
 
@@ -89,6 +92,9 @@ func SetupAPI(r *gin.Engine) {
 	// Sama kayak yang diatas, tapi ini untuk link akun dan wajib kirim JWT yang valid
 	// Google OAUTH2 LINK ( Dari Flutter kirim Auth code + device_id ) wajib kirim headers authorization
 	protected.POST("/auth/google/link", auth.AuthorizationCodeLink)
+
+	// Logout (revoke refresh token)
+	protected.POST("/logout", auth.Logout)
 
 	// Email Verification Routes (excluded from email verification check)
 	protected.POST("/email/send-verification-otp", auth.SendVerificationOtp)
