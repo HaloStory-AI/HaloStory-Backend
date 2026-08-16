@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,10 +31,31 @@ type adminUserItem struct {
 }
 
 func AdminGetUsers(c *gin.Context) {
-	var users []models.User
-	database.DB.Order("created_at desc").Find(&users)
+	page, perPage := getPagination(c, 25)
+	q := strings.TrimSpace(c.Query("q"))
 
-	response := make([]adminUserItem, 0)
+	base := database.DB.Model(&models.User{})
+	if q != "" {
+		like := "%" + q + "%"
+		base = base.Where("name LIKE ? OR email LIKE ?", like, like)
+	}
+
+	var total int64
+	base.Count(&total)
+
+	usersQuery := database.DB.Model(&models.User{})
+	if q != "" {
+		like := "%" + q + "%"
+		usersQuery = usersQuery.Where("name LIKE ? OR email LIKE ?", like, like)
+	}
+
+	var users []models.User
+	usersQuery.Order("created_at desc").
+		Offset((page - 1) * perPage).
+		Limit(perPage).
+		Find(&users)
+
+	response := make([]adminUserItem, 0, len(users))
 	for _, u := range users {
 		response = append(response, adminUserItem{
 			ID:           u.ID,
@@ -47,7 +69,13 @@ func AdminGetUsers(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, adminPage[adminUserItem]{
+		Items:      response,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: pageCount(total, perPage),
+	})
 }
 
 func AdminChangeUserRole(c *gin.Context) {
@@ -131,6 +159,7 @@ type adminBotItem struct {
 	CategorySlug *string    `json:"category_slug"`
 	Description  *string    `json:"description"`
 	Avatar       *string    `json:"avatar"`
+	ImageURL     string     `json:"image_url"`
 	Jailbreak    *string    `json:"background"`
 	Personality  *string    `json:"personality"`
 	ChatExamples *string    `json:"chat_examples"`
@@ -143,10 +172,31 @@ type adminBotItem struct {
 }
 
 func AdminGetBots(c *gin.Context) {
-	var bots []models.Bot
-	database.DB.Order("created_at desc").Find(&bots)
+	page, perPage := getPagination(c, 25)
+	q := strings.TrimSpace(c.Query("q"))
 
-	response := make([]adminBotItem, 0)
+	base := database.DB.Model(&models.Bot{})
+	if q != "" {
+		like := "%" + q + "%"
+		base = base.Where("bot_id LIKE ? OR name LIKE ?", like, like)
+	}
+
+	var total int64
+	base.Count(&total)
+
+	botsQuery := database.DB.Model(&models.Bot{})
+	if q != "" {
+		like := "%" + q + "%"
+		botsQuery = botsQuery.Where("bot_id LIKE ? OR name LIKE ?", like, like)
+	}
+
+	var bots []models.Bot
+	botsQuery.Order("category_slug asc, name asc").
+		Offset((page - 1) * perPage).
+		Limit(perPage).
+		Find(&bots)
+
+	response := make([]adminBotItem, 0, len(bots))
 	for _, bot := range bots {
 		item := adminBotItem{
 			BotID:        bot.BotID,
@@ -154,6 +204,7 @@ func AdminGetBots(c *gin.Context) {
 			CategorySlug: bot.CategorySlug,
 			Description:  bot.Description,
 			Avatar:       bot.Avatar,
+			ImageURL:     services.ImageURL(strPtrValue(bot.Avatar)),
 			Jailbreak:    bot.Jailbreak,
 			Personality:  bot.Personality,
 			ChatExamples: bot.ChatExamples,
@@ -172,7 +223,13 @@ func AdminGetBots(c *gin.Context) {
 		response = append(response, item)
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, adminPage[adminBotItem]{
+		Items:      response,
+		Total:      total,
+		Page:       page,
+		PerPage:    perPage,
+		TotalPages: pageCount(total, perPage),
+	})
 }
 
 func AdminStoreBot(c *gin.Context) {
@@ -525,8 +582,19 @@ type adminStudentRequestItem struct {
 }
 
 func AdminGetStudentRequests(c *gin.Context) {
+	page, perPage := getPagination(c, 25)
+
+	var pendingCount int64
+	database.DB.Model(&models.StudentRequest{}).Where("status = ?", "pending").Count(&pendingCount)
+
+	var total int64
+	database.DB.Model(&models.StudentRequest{}).Count(&total)
+
 	var requests []models.StudentRequest
-	database.DB.Order("FIELD(status, 'pending') DESC, created_at DESC").Find(&requests)
+	database.DB.Order("FIELD(status, 'pending') DESC, created_at DESC").
+		Offset((page - 1) * perPage).
+		Limit(perPage).
+		Find(&requests)
 
 	var userIDs []uint
 	for _, r := range requests {
@@ -549,7 +617,7 @@ func AdminGetStudentRequests(c *gin.Context) {
 		}
 	}
 
-	response := make([]adminStudentRequestItem, 0)
+	response := make([]adminStudentRequestItem, 0, len(requests))
 	for _, r := range requests {
 		userName := userMap[r.UserID]
 		if userName == "" {
@@ -566,7 +634,19 @@ func AdminGetStudentRequests(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, struct {
+		adminPage[adminStudentRequestItem]
+		PendingCount int64 `json:"pending_count"`
+	}{
+		adminPage[adminStudentRequestItem]{
+			Items:      response,
+			Total:      total,
+			Page:       page,
+			PerPage:    perPage,
+			TotalPages: pageCount(total, perPage),
+		},
+		pendingCount,
+	})
 }
 
 func AdminUpdateStudentRequestStatus(c *gin.Context) {
@@ -583,9 +663,9 @@ func AdminUpdateStudentRequestStatus(c *gin.Context) {
 	}
 
 	req.Status = strings.TrimSpace(req.Status)
-	if req.Status != "pending" && req.Status != "approved" && req.Status != "rejected" {
+	if req.Status != "pending" && req.Status != "approved" && req.Status != "rejected" && req.Status != "silent_approved" {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "Status harus 'pending', 'approved', atau 'rejected'.",
+			"message": "Status harus 'pending', 'approved', 'rejected', atau 'silent_approved'.",
 		})
 		return
 	}
@@ -600,7 +680,12 @@ func AdminUpdateStudentRequestStatus(c *gin.Context) {
 
 	oldStatus := reqRecord.Status
 
-	database.DB.Model(&reqRecord).Update("status", req.Status)
+	actualStatus := req.Status
+	if req.Status == "silent_approved" {
+		actualStatus = "approved"
+	}
+
+	database.DB.Model(&reqRecord).Update("status", actualStatus)
 
 	if oldStatus == "pending" && req.Status == "approved" {
 		var user models.User
@@ -819,6 +904,7 @@ type adminCategoryItem struct {
 	Name      string    `json:"name"`
 	Slug      string    `json:"slug"`
 	LogoUrl   *string   `json:"logo_url"`
+	ImageURL  string    `json:"image_url"`
 	Pinned    bool      `json:"pinned"`
 	Featured  bool      `json:"featured"`
 	BotCount  int64     `json:"bot_count"`
@@ -830,19 +916,32 @@ func AdminGetCategories(c *gin.Context) {
 	var categories []models.Category
 	database.DB.Order("name asc").Find(&categories)
 
-	response := make([]adminCategoryItem, 0)
-	for _, cat := range categories {
-		var botCount int64
-		database.DB.Model(&models.Bot{}).Where("category_slug = ?", cat.Slug).Count(&botCount)
+	type slugCount struct {
+		CategorySlug string
+		Count        int64
+	}
+	var counts []slugCount
+	database.DB.Model(&models.Bot{}).
+		Select("category_slug, COUNT(*) AS count").
+		Group("category_slug").
+		Scan(&counts)
 
+	countMap := make(map[string]int64, len(counts))
+	for _, sc := range counts {
+		countMap[sc.CategorySlug] = sc.Count
+	}
+
+	response := make([]adminCategoryItem, 0, len(categories))
+	for _, cat := range categories {
 		response = append(response, adminCategoryItem{
 			ID:        cat.ID,
 			Name:      cat.Name,
 			Slug:      cat.Slug,
 			LogoUrl:   cat.LogoUrl,
+			ImageURL:  services.ImageURL(strPtrValue(cat.LogoUrl)),
 			Pinned:    cat.Pinned,
 			Featured:  cat.Featured,
-			BotCount:  botCount,
+			BotCount:  countMap[cat.Slug],
 			CreatedAt: cat.CreatedAt,
 			UpdatedAt: cat.UpdatedAt,
 		})
@@ -1012,22 +1111,29 @@ func AdminBulkAssignCategory(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "bot_ids wajib diisi."})
 		return
 	}
-	if req.CategorySlug == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"message": "category_slug wajib diisi."})
-		return
-	}
 
-	var cat models.Category
-	if err := database.DB.Where("slug = ?", req.CategorySlug).First(&cat).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "Kategori tidak ditemukan."})
-		return
+	// category_slug kosong/omit = hapus kategori dari bot terpilih (seperti panel lama).
+	var categorySlug *string
+	if strings.TrimSpace(req.CategorySlug) != "" {
+		var cat models.Category
+		if err := database.DB.Where("slug = ?", req.CategorySlug).First(&cat).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"message": "Kategori tidak ditemukan."})
+			return
+		}
+		slug := req.CategorySlug
+		categorySlug = &slug
 	}
 
 	result := database.DB.Model(&models.Bot{}).Where("bot_id IN ?", req.BotIDs).
-		Update("category_slug", req.CategorySlug)
+		Update("category_slug", categorySlug)
+
+	message := fmt.Sprintf("%d bots assigned to category", result.RowsAffected)
+	if categorySlug == nil {
+		message = fmt.Sprintf("%d bots removed from category", result.RowsAffected)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("%d bots assigned to category", result.RowsAffected),
+		"message": message,
 		"updated": result.RowsAffected,
 	})
 }
@@ -1192,6 +1298,7 @@ func AdminUploadFile(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"path": objectKey,
+		"url":  services.ImageURL(objectKey),
 	})
 }
 
@@ -1243,15 +1350,18 @@ func AdminGetCharts(c *gin.Context) {
 
 	// Format label pakai specifier MySQL (bukan pola Java/JS): "yyyy-MM-dd HH:00"
 	// dulu menghasilkan string literal karena DATE_FORMAT hanya mengenali "%...".
-	resp.Hourly = getChartData("hour", now.Add(-24*time.Hour), now, "%Y-%m-%d %H:00")
-	resp.Daily = getChartData("day", now.AddDate(0, 0, -7), now, "%Y-%m-%d")
-	resp.Weekly = getChartData("week", now.AddDate(0, 0, -28), now, "%x-%v")
-	resp.Monthly = getChartData("month", now.AddDate(0, -12, 0), now, "%Y-%m")
+	resp.Hourly = getChartData("hour", now.Add(-24*time.Hour), now, "%Y-%m-%d %H:00", 24)
+	resp.Daily = getChartData("day", now.AddDate(0, 0, -7), now, "%Y-%m-%d", 7)
+	resp.Weekly = getChartData("week", now.AddDate(0, 0, -28), now, "%x-%v", 4)
+	resp.Monthly = getChartData("month", now.AddDate(0, -12, 0), now, "%Y-%m", 12)
 
 	c.JSON(http.StatusOK, resp)
 }
 
-func getChartData(dateFmt string, since, until time.Time, labelFmt string) []chartDataPoint {
+// getChartData mengambil data user_activities per bucket lalu mengisi seluruh
+// bucket (termasuk yang kosong dengan nilai 0) agar chart selalu berbentuk
+// deret penuh — sama seperti panel lama.
+func getChartData(dateFmt string, since, until time.Time, labelFmt string, buckets int) []chartDataPoint {
 	rows, err := database.DB.Raw(`
 		SELECT DATE_FORMAT(created_at, '`+labelFmt+`') AS label,
 		       COUNT(DISTINCT user_id) AS value
@@ -1265,11 +1375,90 @@ func getChartData(dateFmt string, since, until time.Time, labelFmt string) []cha
 	}
 	defer rows.Close()
 
-	result := make([]chartDataPoint, 0)
+	valueMap := make(map[string]int64)
 	for rows.Next() {
 		var dp chartDataPoint
 		rows.Scan(&dp.Label, &dp.Value)
-		result = append(result, dp)
+		valueMap[dp.Label] = dp.Value
+	}
+
+	return fillChartSeries(dateFmt, until, buckets, valueMap)
+}
+
+// fillChartSeries membangun deret bucket berurutan dari yang paling lama ke
+// yang terbaru, mengisi nilai 0 untuk bucket tanpa data.
+func fillChartSeries(dateFmt string, until time.Time, buckets int, valueMap map[string]int64) []chartDataPoint {
+	result := make([]chartDataPoint, 0, buckets)
+	for i := buckets - 1; i >= 0; i-- {
+		t := until
+		switch dateFmt {
+		case "hour":
+			t = until.Add(-time.Duration(i) * time.Hour).Truncate(time.Hour)
+		case "day":
+			t = until.AddDate(0, 0, -i)
+		case "week":
+			t = until.AddDate(0, 0, -7*i)
+		case "month":
+			t = until.AddDate(0, -i, 0)
+		}
+		label := chartLabel(dateFmt, t)
+		result = append(result, chartDataPoint{Label: label, Value: valueMap[label]})
 	}
 	return result
+}
+
+func chartLabel(dateFmt string, t time.Time) string {
+	switch dateFmt {
+	case "hour":
+		return t.Format("2006-01-02 15:00")
+	case "day":
+		return t.Format("2006-01-02")
+	case "week":
+		y, w := t.ISOWeek()
+		return fmt.Sprintf("%d-%02d", y, w)
+	case "month":
+		return t.Format("2006-01")
+	}
+	return ""
+}
+
+// getPagination membaca parameter page/per_page dengan default dan batas aman.
+func getPagination(c *gin.Context, defaultPerPage int) (page, perPage int) {
+	page, _ = strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+
+	perPage, _ = strconv.Atoi(c.DefaultQuery("per_page", strconv.Itoa(defaultPerPage)))
+	if perPage < 1 {
+		perPage = defaultPerPage
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	return
+}
+
+func pageCount(total int64, perPage int) int {
+	pages := int(total) / perPage
+	if int(total)%perPage != 0 {
+		pages++
+	}
+	return pages
+}
+
+func strPtrValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// adminPage adalah envelope pagination standar untuk list admin.
+type adminPage[T any] struct {
+	Items      []T   `json:"items"`
+	Total      int64 `json:"total"`
+	Page       int   `json:"page"`
+	PerPage    int   `json:"per_page"`
+	TotalPages int   `json:"total_pages"`
 }
