@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -1117,6 +1118,111 @@ func strPtrOrNil(s string) *string {
 	return &s
 }
 
+// ───────────────────── Admin: File Upload ─────────────────────
+
+// AdminUploadFile menyimpan file (avatar bot / logo kategori) ke S3/MinIO dan
+// mengembalikan path yang bisa disimpan langsung ke kolom avatar/logo_url.
+// Form: file, type ("bot"|"category"), key (bot_id / slug).
+// Object key mengikuti skema lama: "Bot/{key}/{filename}" / "Category/{key}/{filename}".
+func AdminUploadFile(c *gin.Context) {
+	uploadType := c.PostForm("type")
+	key := c.PostForm("key")
+
+	if uploadType != "bot" && uploadType != "category" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "type harus 'bot' atau 'category'.",
+		})
+		return
+	}
+	if strings.TrimSpace(key) == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "key wajib diisi.",
+		})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "File 'file' wajib diupload.",
+		})
+		return
+	}
+	defer file.Close()
+
+	filename := sanitizeFileName(header.Filename)
+	if filename == "" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Nama file tidak valid.",
+		})
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "Gagal membaca file.",
+		})
+		return
+	}
+	if len(data) == 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"message": "File kosong.",
+		})
+		return
+	}
+
+	folder := "Bot"
+	if uploadType == "category" {
+		folder = "Category"
+	}
+	objectKey := fmt.Sprintf("%s/%s/%s", folder, key, filename)
+
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	if err := services.UploadObject(objectKey, data, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Gagal mengupload file.",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"path": objectKey,
+	})
+}
+
+// sanitizeFileName membersihkan nama file yang diupload: hanya huruf, angka,
+// titik, strip, dan underscore; spasi diganti strip; dibatasi panjangnya.
+func sanitizeFileName(name string) string {
+	name = strings.TrimSpace(filepath.Base(name))
+
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '-' || r == '_':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+	}
+
+	result := strings.Trim(b.String(), ".-_")
+	if len(result) > 80 {
+		ext := filepath.Ext(result)
+		base := strings.TrimSuffix(result, ext)
+		if len(base) > 40 {
+			base = base[:40]
+		}
+		result = base + ext
+	}
+	return result
+}
+
 // ───────────────────── Admin: Charts ─────────────────────
 
 type adminChartsResponse struct {
@@ -1135,10 +1241,12 @@ func AdminGetCharts(c *gin.Context) {
 	now := time.Now()
 	var resp adminChartsResponse
 
-	resp.Hourly = getChartData("hour", now.Add(-24*time.Hour), now, "yyyy-MM-dd HH:00")
-	resp.Daily = getChartData("day", now.AddDate(0, 0, -7), now, "yyyy-MM-dd")
-	resp.Weekly = getChartData("week", now.AddDate(0, 0, -28), now, "yyyy-ww")
-	resp.Monthly = getChartData("month", now.AddDate(0, -12, 0), now, "yyyy-MM")
+	// Format label pakai specifier MySQL (bukan pola Java/JS): "yyyy-MM-dd HH:00"
+	// dulu menghasilkan string literal karena DATE_FORMAT hanya mengenali "%...".
+	resp.Hourly = getChartData("hour", now.Add(-24*time.Hour), now, "%Y-%m-%d %H:00")
+	resp.Daily = getChartData("day", now.AddDate(0, 0, -7), now, "%Y-%m-%d")
+	resp.Weekly = getChartData("week", now.AddDate(0, 0, -28), now, "%x-%v")
+	resp.Monthly = getChartData("month", now.AddDate(0, -12, 0), now, "%Y-%m")
 
 	c.JSON(http.StatusOK, resp)
 }

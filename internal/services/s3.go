@@ -1,6 +1,9 @@
 package services
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"log"
 	"net/url"
 
@@ -46,4 +49,24 @@ func InitS3() {
 	MinioClient = client
 	S3Bucket = s3Bucket
 	log.Println("Successfully initialized S3 client.")
+}
+
+// UploadObject menulis objek ke bucket S3/MinIO yang sama. Dipakai oleh admin
+// untuk menyimpan avatar bot / logo kategori dengan key seperti "Bot/{botId}/{file}".
+func UploadObject(objectKey string, data []byte, contentType string) error {
+	if MinioClient == nil || S3Bucket == "" {
+		return fmt.Errorf("S3 client is not initialized")
+	}
+
+	_, err := MinioClient.PutObject(
+		context.Background(),
+		S3Bucket,
+		objectKey,
+		bytes.NewReader(data),
+		int64(len(data)),
+		minio.PutObjectOptions{
+			ContentType: contentType,
+		},
+	)
+	return err
 }

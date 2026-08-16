@@ -205,6 +205,8 @@ func SetupAPI(r *gin.Engine) {
 		admin.POST("/bots/bulk-assign-category", apiControllers.AdminBulkAssignCategory)
 		admin.POST("/bots/bulk-store", apiControllers.AdminBulkStoreBots)
 
+		admin.POST("/upload", apiControllers.AdminUploadFile)
+
 		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
 		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)
 	}
