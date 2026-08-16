@@ -583,15 +583,23 @@ type adminStudentRequestItem struct {
 
 func AdminGetStudentRequests(c *gin.Context) {
 	page, perPage := getPagination(c, 25)
+	q := strings.TrimSpace(c.Query("q"))
 
 	var pendingCount int64
 	database.DB.Model(&models.StudentRequest{}).Where("status = ?", "pending").Count(&pendingCount)
 
+	base := database.DB.Model(&models.StudentRequest{}).
+		Joins("LEFT JOIN users ON users.id = student_requests.user_id")
+	if q != "" {
+		like := "%" + q + "%"
+		base = base.Where("student_requests.student_name LIKE ? OR users.name LIKE ?", like, like)
+	}
+
 	var total int64
-	database.DB.Model(&models.StudentRequest{}).Count(&total)
+	base.Count(&total)
 
 	var requests []models.StudentRequest
-	database.DB.Order("FIELD(status, 'pending') DESC, created_at DESC").
+	base.Order("FIELD(student_requests.status, 'pending') DESC, student_requests.created_at DESC").
 		Offset((page - 1) * perPage).
 		Limit(perPage).
 		Find(&requests)
