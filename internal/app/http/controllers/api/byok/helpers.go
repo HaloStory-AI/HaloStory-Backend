@@ -9,6 +9,7 @@ import (
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/services/llm"
 	"halostory_go_backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -60,6 +61,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	if model == "" {
 		model = defaultModel
 	}
+
+	// Fase 2: registry validate (non-blocking, log only)
+	_ = llm.Default.Validate(provider, model, nil)
 
 	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
 		Messages:          req.Messages,

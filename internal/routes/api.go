@@ -182,6 +182,8 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/byok/mock/chat", byokControllers.MockChat)
 		verified.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
 		verified.POST("/byok/models", byokControllers.FetchModels)
+		// Fase 2: registry read-only
+		verified.GET("/llm/providers", apiControllers.ListProviders)
 	}
 
 	// ─── Admin Panel ───

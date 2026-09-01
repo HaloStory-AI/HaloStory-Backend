@@ -18,6 +18,7 @@ import (
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/services/llm"
 	"halostory_go_backend/internal/services/observability"
 	"halostory_go_backend/internal/services/systemai"
 	"halostory_go_backend/internal/utils"
@@ -222,6 +223,14 @@ func processJob(rawData []byte) {
 	if data.UserID > 0 {
 		userID := uint(data.UserID)
 		database.DB.Create(&models.UserActivity{UserID: userID})
+	}
+
+	// Fase 2: registry validate + circuit check (non-blocking, fallback to old switch)
+	if llm.IsDispatcherEnabled() {
+		_ = llm.Default.Validate(data.Provider, data.Model, &data.BaseURL)
+		if !llm.Allow(data.Provider, data.Model) {
+			observability.Warn("llm.circuit_open", "trace_id", traceID, "provider", data.Provider, "model", data.Model)
+		}
 	}
 
 	switch data.Provider {
