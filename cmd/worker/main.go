@@ -20,6 +20,7 @@ import (
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/services/llm"
+	"halostory_go_backend/internal/services/memory"
 	"halostory_go_backend/internal/services/observability"
 	"halostory_go_backend/internal/services/systemai"
 	"halostory_go_backend/internal/utils"
@@ -334,11 +335,33 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
+	// Fase 4: lorebook staff-based (per bot) — scan sebelum inject, injection setelah
+	lorebooks := memory.GetLorebooks(botID)
+	loreInjection := ""
+	if len(lorebooks) > 0 {
+		var texts []string
+		for _, m := range messages {
+			texts = append(texts, m.Content)
+		}
+		matched := memory.Scan(texts, lorebooks)
+		loreInjection = memory.BuildLorebookInjection(matched)
+	}
 	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
 		data.Model,
 	)
+	if loreInjection != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjection
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjection}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID
@@ -673,11 +696,33 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 			sysModel = "system-free"
 		}
 	}
+	// Fase 4: lorebook staff-based
+	lorebooksSys := memory.GetLorebooks(botID)
+	loreInjectionSys := ""
+	if len(lorebooksSys) > 0 {
+		var textsSys []string
+		for _, m := range messages {
+			textsSys = append(textsSys, m.Content)
+		}
+		matchedSys := memory.Scan(textsSys, lorebooksSys)
+		loreInjectionSys = memory.BuildLorebookInjection(matchedSys)
+	}
 	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
 		sysModel,
 	)
+	if loreInjectionSys != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionSys
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionSys}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID
@@ -1055,6 +1100,17 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		}
 	}
 
+	// Fase 4: lorebook staff-based — scan before prompt
+	lorebooksOA := memory.GetLorebooks(botID)
+	loreInjectionOA := ""
+	if len(lorebooksOA) > 0 {
+		var textsOA []string
+		for _, m := range messages {
+			textsOA = append(textsOA, m.Content)
+		}
+		matchedOA := memory.Scan(textsOA, lorebooksOA)
+		loreInjectionOA = memory.BuildLorebookInjection(matchedOA)
+	}
 	shouldInject := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
 	if !shouldInject {
 		var usr models.User
@@ -1075,6 +1131,17 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 			messages = byok.InjectGroupContext(
 				messages, data.BotIDs, &primaryBotID, lang, &userID,
 			)
+		}
+	}
+	if loreInjectionOA != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionOA
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionOA}}, messages...)
 		}
 	}
 
@@ -1390,11 +1457,33 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
+	// Fase 4: lorebook staff-based for Claude
+	lorebooksClaude := memory.GetLorebooks(botID)
+	loreInjectionClaude := ""
+	if len(lorebooksClaude) > 0 {
+		var textsClaude []string
+		for _, m := range messages {
+			textsClaude = append(textsClaude, m.Content)
+		}
+		matchedClaude := memory.Scan(textsClaude, lorebooksClaude)
+		loreInjectionClaude = memory.BuildLorebookInjection(matchedClaude)
+	}
 	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
 		data.Model,
 	)
+	if loreInjectionClaude != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionClaude
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionClaude}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID

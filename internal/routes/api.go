@@ -3,6 +3,7 @@ package routes
 import (
 	"net/http"
 
+	adminControllers "halostory_go_backend/internal/app/http/controllers/admin"
 	apiControllers "halostory_go_backend/internal/app/http/controllers/api"
 	byokControllers "halostory_go_backend/internal/app/http/controllers/api/byok"
 	"halostory_go_backend/internal/app/http/controllers/auth"
@@ -222,5 +223,17 @@ func SetupAPI(r *gin.Engine) {
 
 		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
 		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)
+
+		// Fase 4: Lorebook STAFF-BASED (admin only, per karakter)
+		admin.GET("/bots/:bot_id/lorebooks", adminControllers.ListLorebooks)
+		admin.POST("/bots/:bot_id/lorebooks", adminControllers.CreateLorebook)
+		admin.PUT("/bots/:bot_id/lorebooks/:id", adminControllers.UpdateLorebook)
+		admin.DELETE("/bots/:bot_id/lorebooks/:id", adminControllers.DeleteLorebook)
+		admin.POST("/bots/:bot_id/lorebooks/preview", adminControllers.PreviewLorebook)
+
+		// Fase 5: Prompt templating STAFF-BASED (admin only)
+		admin.GET("/prompts/templates", adminControllers.ListPromptTemplates)
+		admin.POST("/prompts/render", adminControllers.RenderPromptPreview)
+		admin.PUT("/prompts/templates", adminControllers.UpdatePromptTemplate)
 	}
 }

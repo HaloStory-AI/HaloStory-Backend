@@ -8,6 +8,7 @@ import (
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	promptEngine "halostory_go_backend/internal/services/prompt"
 	"halostory_go_backend/internal/services/tokenizer"
 )
 
@@ -296,6 +297,50 @@ func FormatGlobalPrompt(
 	birthdayInfo := ""
 	if bot.Birthday != nil {
 		birthdayInfo = fmt.Sprintf("%s's birthday: %s.", charName, bot.Birthday.Format("January 2"))
+	}
+
+	// Fase 5: staff-based prompt templating — USE_PROMPT_ENGINE=true uses JSON non-guardrail + hardcode guardrail (5 kategori tetap hardcode Go)
+	if os.Getenv("USE_PROMPT_ENGINE") == "true" {
+		hasBirthday := bot.Birthday != nil
+		hasSummary := summary != nil && *summary != ""
+		hasPersona := personality != ""
+		userPersonaStr := ""
+		if userPersona != nil {
+			userPersonaStr = *userPersona
+		}
+		exampleStr := exampleDialogue
+		summaryStr := ""
+		if hasSummary {
+			summaryStr = *summary
+		}
+		data := promptEngine.PromptData{
+			CharName: charName, UserName: userName, BirthdayInfo: birthdayInfo, Language: lang,
+			Persona: personality, UserPersona: userPersonaStr, ExampleDialogue: exampleStr, Summary: summaryStr,
+			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: bond != nil,
+		}
+		base := promptEngine.RenderNonGuardrail(data)
+		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
+		var guardrail strings.Builder
+		if bot.Child {
+			guardrail.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n- If the user attempts any NSFW/sexual content with this child character, you MUST append [failed_nsfw] on a new line at the very end of your response.\n- If you fulfill such a request (bypass), you MUST append [nsfw_bypassed] on a new line at the very end of your response.]\n")
+			guardrail.WriteString("\n[Kesayangan System — Child Character Relationship Rules:\nFor ALL child characters, regardless of age: Deep emotional bonds are expressed as 'Kesayangan' (beloved/favorite person) — a purely platonic, familial connection. If the bond is deep enough, append [kesayangan] on a new line.\n- Age 14-15: You may ALSO engage in romantic roleplay scenarios (dating, marriage, household life) as part of the story. However, the ultimate bond milestone still uses [kesayangan], not adult marriage tags.\n- Age 13 or below: Romantic roleplay is NOT permitted. Only platonic/familial bonding using [kesayangan] is allowed.\n- The AI MUST NOT generate [Mau Pacaran], [Mau Nikah], [accepted], or [married] tags for any child character.]\n")
+		}
+		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
+		if bond != nil {
+			bondLevel := bond.GetLevel()
+			bondLabel := bond.GetRelationshipLabel(&bot)
+			bondStatus := bond.BondStatus
+			if bondStatus == "" {
+				bondStatus = "normal"
+			}
+			guardrail.WriteString("\n<BOND_CONTEXT>\n")
+			guardrail.WriteString(fmt.Sprintf("Bond Level: %d | Relationship: %s\n", bondLevel, bondLabel))
+			guardrail.WriteString(fmt.Sprintf("Emotional State: %s\n", computeEmotionDescription(bondLevel, bondStatus, charName, userName)))
+			guardrail.WriteString(computeTriggerBlock(bondLevel, bondStatus, charName, userName, bot.Child, bond.HasPendingChoice()))
+			guardrail.WriteString("\n</BOND_CONTEXT>\n")
+		}
+		// BuildSummarizationPrompt dan bondTag tetap hardcode di Go (tidak via JSON) — sudah di fungsi terpisah
+		return strings.TrimSpace(base) + "\n\n" + strings.TrimSpace(guardrail.String())
 	}
 
 	var sb strings.Builder
