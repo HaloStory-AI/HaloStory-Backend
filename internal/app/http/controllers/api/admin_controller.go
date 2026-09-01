@@ -313,7 +313,7 @@ func AdminStoreBot(c *gin.Context) {
 }
 
 func AdminUpdateBot(c *gin.Context) {
-	botID := c.Param("id")
+	botID := c.Param("bot_id")
 
 	var bot models.Bot
 	if err := database.DB.Where("bot_id = ?", botID).First(&bot).Error; err != nil {
@@ -425,7 +425,7 @@ func AdminUpdateBot(c *gin.Context) {
 }
 
 func AdminDeleteBot(c *gin.Context) {
-	botID := c.Param("id")
+	botID := c.Param("bot_id")
 
 	result := database.DB.Where("bot_id = ?", botID).Delete(&models.Bot{})
 	if result.RowsAffected == 0 {

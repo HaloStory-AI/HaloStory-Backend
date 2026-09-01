@@ -188,8 +188,8 @@ func SetupAPI(r *gin.Engine) {
 		admin.GET("/bots", apiControllers.AdminGetBots)
 		admin.POST("/bots", apiControllers.AdminStoreBot)
 		admin.POST("/bots/import", apiControllers.AdminImportBots)
-		admin.PUT("/bots/:id", apiControllers.AdminUpdateBot)
-		admin.DELETE("/bots/:id", apiControllers.AdminDeleteBot)
+		admin.PUT("/bots/:bot_id", apiControllers.AdminUpdateBot)
+		admin.DELETE("/bots/:bot_id", apiControllers.AdminDeleteBot)
 
 		admin.GET("/settings", apiControllers.AdminGetSettings)
 		admin.PUT("/settings", apiControllers.AdminUpdateSettings)
