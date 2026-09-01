@@ -36,6 +36,7 @@ type ClaudeChatRequest struct {
 	UserPersona      *string                 `json:"user_persona,omitempty"`
 	BotIDs           []string                `json:"bot_ids,omitempty"`
 	BotID            *string                 `json:"bot_id,omitempty"`
+	ContextLimit     *int                    `json:"context_limit,omitempty"`
 }
 
 func ClaudeChat(c *gin.Context) {
@@ -80,6 +81,7 @@ func ClaudeChat(c *gin.Context) {
 		BotIDs:           req.BotIDs,
 		ExistingMemories: req.ExistingMemories,
 		BotID:            req.BotID,
+		ContextLimit:     req.ContextLimit,
 		SourceIP:         c.ClientIP(),
 	}); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -109,6 +111,15 @@ func ClaudeChat(c *gin.Context) {
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := map[string]interface{}{
 		"uuid":     uid,
@@ -118,6 +129,7 @@ func ClaudeChat(c *gin.Context) {
 		"model":    req.Model,
 		"provider": "claude",
 		"user_id":  user.ID,
+		"trace_id": traceID,
 	}
 
 	if req.Temperature != nil {
@@ -170,6 +182,9 @@ func ClaudeChat(c *gin.Context) {
 	}
 	if len(req.ExistingMemories) > 0 {
 		payload["existing_memories"] = req.ExistingMemories
+	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

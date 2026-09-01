@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/services/llm"
+	"halostory_go_backend/internal/services/memory"
+	"halostory_go_backend/internal/services/observability"
 	"halostory_go_backend/internal/services/systemai"
 	"halostory_go_backend/internal/utils"
 )
@@ -56,6 +60,8 @@ type chatData struct {
 	Reasoning        *reasoningConfig `json:"reasoning,omitempty"`
 	Stop             []string         `json:"stop,omitempty"`
 	ResponseLength   float64          `json:"response_length,omitempty"`
+	TraceID          string           `json:"trace_id,omitempty"`
+	ContextLimit     float64          `json:"context_limit,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -91,20 +97,25 @@ func dispatchJob(data []byte, sem chan struct{}, goroutineName string) {
 	sem <- struct{}{}
 	go func(d []byte) {
 		var jobUUID string
+		var jobTraceID string
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("Worker: RECOVERED panic in %s goroutine: %v", goroutineName, r)
+				observability.Error("worker.panic", "goroutine", goroutineName, "error", fmt.Sprintf("%v", r), "uuid", jobUUID, "trace_id", jobTraceID)
 				if jobUUID != "" {
 					markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
 				}
 			}
 			<-sem
 		}()
-		// Pre-extract uuid for panic recovery
+		// Pre-extract uuid/trace_id for panic recovery
 		var rawPayload map[string]interface{}
 		if json.Unmarshal(d, &rawPayload) == nil {
 			if u, ok := rawPayload["uuid"].(string); ok {
 				jobUUID = u
+			}
+			if tid, ok := rawPayload["trace_id"].(string); ok {
+				jobTraceID = tid
 			}
 		}
 		processJob(d)
@@ -113,6 +124,7 @@ func dispatchJob(data []byte, sem chan struct{}, goroutineName string) {
 
 func main() {
 	config.LoadConfig()
+	observability.InitLogger()
 	database.Connect()
 	services.InitRedis()
 
@@ -174,6 +186,7 @@ func main() {
 }
 
 func processJob(rawData []byte) {
+	start := time.Now()
 	var payload map[string]interface{}
 	if err := json.Unmarshal(rawData, &payload); err != nil {
 		log.Printf("Worker: Failed to parse job payload: %v", err)
@@ -181,9 +194,13 @@ func processJob(rawData []byte) {
 	}
 
 	uuid, _ := payload["uuid"].(string)
+	traceID, _ := payload["trace_id"].(string)
 	if uuid == "" {
 		log.Printf("Worker: Missing uuid in payload")
 		return
+	}
+	if traceID != "" && observability.ShouldSample() {
+		observability.Info("worker.job.start", "trace_id", traceID, "uuid", uuid, "provider", payload["provider"])
 	}
 
 	storeKey := "chat:" + uuid
@@ -210,6 +227,14 @@ func processJob(rawData []byte) {
 		database.DB.Create(&models.UserActivity{UserID: userID})
 	}
 
+	// Fase 2: registry validate + circuit check (non-blocking, fallback to old switch)
+	if llm.IsDispatcherEnabled() {
+		_ = llm.Default.Validate(data.Provider, data.Model, &data.BaseURL)
+		if !llm.Allow(data.Provider, data.Model) {
+			observability.Warn("llm.circuit_open", "trace_id", traceID, "provider", data.Provider, "model", data.Model)
+		}
+	}
+
 	switch data.Provider {
 	case "mock":
 		processMockChat(uuid, storeKey, data)
@@ -224,6 +249,13 @@ func processJob(rawData []byte) {
 	default:
 		log.Printf("Worker: Unsupported provider %s for UUID %s", data.Provider, uuid)
 		markError(uuid, storeKey, "Unsupported provider: "+data.Provider, 400)
+	}
+
+	latency := time.Since(start)
+	observability.ObserveLatency(data.Provider, latency)
+	observability.IncRequest(data.Provider, data.Model, "completed")
+	if traceID != "" {
+		observability.Info("worker.job.done", "trace_id", traceID, "uuid", uuid, "provider", data.Provider, "model", data.Model, "latency_ms", latency.Milliseconds())
 	}
 }
 
@@ -264,7 +296,10 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -300,10 +335,33 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
-	messages = byok.InjectByokSystemPrompt(
+	// Fase 4: lorebook staff-based (per bot) — scan sebelum inject, injection setelah
+	lorebooks := memory.GetLorebooks(botID)
+	loreInjection := ""
+	if len(lorebooks) > 0 {
+		var texts []string
+		for _, m := range messages {
+			texts = append(texts, m.Content)
+		}
+		matched := memory.Scan(texts, lorebooks)
+		loreInjection = memory.BuildLorebookInjection(matched)
+	}
+	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		data.Model,
 	)
+	if loreInjection != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjection
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjection}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID
@@ -586,6 +644,13 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 	if maxTokens == 0 {
 		maxTokens = systemai.DefaultMaxTokens
 	}
+	var contextLimit *int
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else {
+		contextLimit = &maxTokens
+	}
 
 	isVip := false
 	var user models.User
@@ -622,10 +687,42 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 		userPersona = &data.UserPersona
 	}
 
-	messages = byok.InjectByokSystemPrompt(
-		messages, &botID, &lang, &historyDepth, &maxTokens,
+	// Fase 1: use token-accurate model (system router uses Free_User/VIP_User pseudo model for routing)
+	sysModel := data.Model
+	if sysModel == "" {
+		if isVip {
+			sysModel = "system-vip"
+		} else {
+			sysModel = "system-free"
+		}
+	}
+	// Fase 4: lorebook staff-based
+	lorebooksSys := memory.GetLorebooks(botID)
+	loreInjectionSys := ""
+	if len(lorebooksSys) > 0 {
+		var textsSys []string
+		for _, m := range messages {
+			textsSys = append(textsSys, m.Content)
+		}
+		matchedSys := memory.Scan(textsSys, lorebooksSys)
+		loreInjectionSys = memory.BuildLorebookInjection(matchedSys)
+	}
+	messages = byok.InjectByokSystemPromptWithModel(
+		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		sysModel,
 	)
+	if loreInjectionSys != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionSys
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionSys}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID
@@ -771,6 +868,15 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 		"status":      "completed",
 		"response":    response,
 		"status_code": statusCode,
+	}
+	// Preserve trace_id from original payload if exists
+	if existing, err := services.GetChatResult(uuid); err == nil {
+		var existingMap map[string]interface{}
+		if json.Unmarshal(existing, &existingMap) == nil {
+			if tid, ok := existingMap["trace_id"].(string); ok && tid != "" {
+				payload["trace_id"] = tid
+			}
+		}
 	}
 	jsonBytes, _ := json.Marshal(payload)
 	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
@@ -960,7 +1066,10 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -991,6 +1100,17 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		}
 	}
 
+	// Fase 4: lorebook staff-based — scan before prompt
+	lorebooksOA := memory.GetLorebooks(botID)
+	loreInjectionOA := ""
+	if len(lorebooksOA) > 0 {
+		var textsOA []string
+		for _, m := range messages {
+			textsOA = append(textsOA, m.Content)
+		}
+		matchedOA := memory.Scan(textsOA, lorebooksOA)
+		loreInjectionOA = memory.BuildLorebookInjection(matchedOA)
+	}
 	shouldInject := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
 	if !shouldInject {
 		var usr models.User
@@ -1000,9 +1120,10 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 	}
 
 	if shouldInject {
-		messages = byok.InjectByokSystemPrompt(
+		messages = byok.InjectByokSystemPromptWithModel(
 			messages, &botID, &lang, &historyDepth, contextLimit,
 			summary, &userID, data.IsDisableBond, userPersona,
+			model,
 		)
 
 		if data.IsGroup && len(data.BotIDs) > 1 {
@@ -1010,6 +1131,17 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 			messages = byok.InjectGroupContext(
 				messages, data.BotIDs, &primaryBotID, lang, &userID,
 			)
+		}
+	}
+	if loreInjectionOA != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionOA
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionOA}}, messages...)
 		}
 	}
 
@@ -1090,10 +1222,42 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		}
 	}
 
-	openaiResp, statusCode, err := byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
-	if err != nil {
-		log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
-		markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+	var openaiResp *byok.OpenAICompatResponse
+	var statusCode int
+	// Fase 3: try streaming if enabled (USE_STREAMING != false)
+	if os.Getenv("USE_STREAMING") != "false" {
+		streamClient := utils.NewAIHttpClientNoTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+		// publish streaming deltas
+		resp, code, cerr := byok.CallOpenAIStream(ctx, streamClient, decryptedKey, baseURL, model, reqPayload, openAIOpts, func(delta string) error {
+			_ = services.PublishStream(uuid, delta)
+			return nil
+		})
+		cancel()
+		if cerr == nil && resp != nil {
+			openaiResp = resp
+			statusCode = code
+			_ = services.PublishStreamDone(uuid)
+		} else {
+			// fallback to non-stream
+			openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
+			if err != nil {
+				log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
+				markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+				return
+			}
+		}
+	} else {
+		openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
+		if err != nil {
+			log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
+			markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+			return
+		}
+	}
+	if openaiResp == nil {
+		log.Printf("Worker: OpenAI API error for %s: nil response (status %d)", uuid, statusCode)
+		markError(uuid, storeKey, "OpenAI API error: nil response", statusCode)
 		return
 	}
 
@@ -1254,7 +1418,10 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -1290,10 +1457,33 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
-	messages = byok.InjectByokSystemPrompt(
+	// Fase 4: lorebook staff-based for Claude
+	lorebooksClaude := memory.GetLorebooks(botID)
+	loreInjectionClaude := ""
+	if len(lorebooksClaude) > 0 {
+		var textsClaude []string
+		for _, m := range messages {
+			textsClaude = append(textsClaude, m.Content)
+		}
+		matchedClaude := memory.Scan(textsClaude, lorebooksClaude)
+		loreInjectionClaude = memory.BuildLorebookInjection(matchedClaude)
+	}
+	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		data.Model,
 	)
+	if loreInjectionClaude != "" {
+		for i, m := range messages {
+			if m.Role == "system" {
+				messages[i].Content += loreInjectionClaude
+				break
+			}
+		}
+		if len(messages) > 0 && messages[0].Role != "system" {
+			messages = append([]byok.Message{{Role: "system", Content: loreInjectionClaude}}, messages...)
+		}
+	}
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
 		primaryBotID := botID

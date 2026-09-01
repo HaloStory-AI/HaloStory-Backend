@@ -1,7 +1,9 @@
 package byok
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -126,4 +128,118 @@ func CallOpenAI(httpClient *http.Client, apiKey, baseURL, model string, payload 
 	}
 
 	return &openAIResp, resp.StatusCode, nil
+}
+
+// Fase 3: streaming via SSE (OpenAI-compatible)
+// Parses `data: {...}` lines, calls onDelta per content chunk.
+func CallOpenAIStream(ctx context.Context, httpClient *http.Client, apiKey, baseURL, model string, payload OpenAICompatRequest, opts *OpenAIRequestOptions, onDelta func(string) error) (*OpenAICompatResponse, int, error) {
+	endpoint := baseURL
+	if !strings.Contains(endpoint, "/chat/completions") {
+		endpoint = strings.TrimRight(endpoint, "/") + "/chat/completions"
+	}
+	if model != "" {
+		payload.Model = model
+	}
+	stream := true
+	payload.Stream = &stream
+
+	bodyMap := make(map[string]interface{})
+	bodyBytes, _ := json.Marshal(payload)
+	_ = json.Unmarshal(bodyBytes, &bodyMap)
+	if opts != nil && opts.ExtraBody != nil {
+		for k, v := range opts.ExtraBody {
+			bodyMap[k] = v
+		}
+	}
+	body, err := json.Marshal(bodyMap)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if opts != nil && opts.ExtraHeaders != nil {
+		for k, v := range opts.ExtraHeaders {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 429 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("rate limited (429): %s", string(b))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(b))
+	}
+	// SSE parse
+	var fullContent strings.Builder
+	var finishReason string
+	var usage OpenAICompatUsage
+	scanner := bufio.NewScanner(resp.Body)
+	// increase buffer for long lines
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+				FinishReason *string `json:"finish_reason"`
+				Index        int     `json:"index"`
+			} `json:"choices"`
+			Usage *OpenAICompatUsage `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if chunk.Usage != nil {
+			usage = *chunk.Usage
+		}
+		for _, ch := range chunk.Choices {
+			if ch.Delta.Content != "" {
+				fullContent.WriteString(ch.Delta.Content)
+				if onDelta != nil {
+					_ = onDelta(ch.Delta.Content)
+				}
+			}
+			if ch.FinishReason != nil && *ch.FinishReason != "" {
+				finishReason = *ch.FinishReason
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		// treat as error only if no content
+		if fullContent.Len() == 0 {
+			return nil, 0, fmt.Errorf("stream read error: %w", err)
+		}
+	}
+	respObj := &OpenAICompatResponse{
+		Model: model,
+		Choices: []OpenAICompatChoice{
+			{Index: 0, Message: OpenAIChatMessage{Role: "assistant", Content: fullContent.String()}, FinishReason: finishReason},
+		},
+		Usage: &usage,
+	}
+	return respObj, http.StatusOK, nil
 }

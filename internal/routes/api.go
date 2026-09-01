@@ -3,12 +3,14 @@ package routes
 import (
 	"net/http"
 
+	adminControllers "halostory_go_backend/internal/app/http/controllers/admin"
 	apiControllers "halostory_go_backend/internal/app/http/controllers/api"
 	byokControllers "halostory_go_backend/internal/app/http/controllers/api/byok"
 	"halostory_go_backend/internal/app/http/controllers/auth"
 	"halostory_go_backend/internal/app/http/middlewares"
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
+	"halostory_go_backend/internal/services/observability"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
@@ -16,6 +18,11 @@ import (
 
 // SetupAPI mendaftarkan semua route untuk aplikasi
 func SetupAPI(r *gin.Engine) {
+	// Observability: metrics endpoint (public, Prometheus-compatible)
+	r.GET("/metrics", observability.MetricsHandler)
+	apiMetrics := r.Group("/api")
+	apiMetrics.GET("/metrics", observability.MetricsHandler)
+
 	// Membuat grup route untuk /api
 	api := r.Group("/api")
 
@@ -156,12 +163,17 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)
 		verified.POST("/ai/summarize", apiControllers.Summarize)
 		verified.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
+		// Fase 1: tokenizer debug
+		verified.GET("/ai/tokenize", apiControllers.Tokenize)
+		verified.POST("/ai/tokenize", apiControllers.Tokenize)
 
 		// ─── Call ( WEBRTC ) - Belum di Implementasi ───
 		// verified.GET("")
 
 		// ─── BYOK Chat Status (shared polling) ───
 		verified.GET("/chat/status/:uuid", byokControllers.ChatStatus)
+		// Fase 3: SSE streaming (polling fallback tetap)
+		verified.GET("/chat/stream/:uuid", apiControllers.ChatStream)
 
 		// ─── BYOK Endpoints ───
 		verified.POST("/byok/gemini/chat", byokControllers.GeminiChat)
@@ -173,6 +185,8 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/byok/mock/chat", byokControllers.MockChat)
 		verified.POST("/byok/openai-compatible/chat", byokControllers.OpenAICompatibleChat)
 		verified.POST("/byok/models", byokControllers.FetchModels)
+		// Fase 2: registry read-only
+		verified.GET("/llm/providers", apiControllers.ListProviders)
 	}
 
 	// ─── Admin Panel ───
@@ -209,5 +223,17 @@ func SetupAPI(r *gin.Engine) {
 
 		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
 		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)
+
+		// Fase 4: Lorebook STAFF-BASED (admin only, per karakter)
+		admin.GET("/bots/:bot_id/lorebooks", adminControllers.ListLorebooks)
+		admin.POST("/bots/:bot_id/lorebooks", adminControllers.CreateLorebook)
+		admin.PUT("/bots/:bot_id/lorebooks/:id", adminControllers.UpdateLorebook)
+		admin.DELETE("/bots/:bot_id/lorebooks/:id", adminControllers.DeleteLorebook)
+		admin.POST("/bots/:bot_id/lorebooks/preview", adminControllers.PreviewLorebook)
+
+		// Fase 5: Prompt templating STAFF-BASED (admin only)
+		admin.GET("/prompts/templates", adminControllers.ListPromptTemplates)
+		admin.POST("/prompts/render", adminControllers.RenderPromptPreview)
+		admin.PUT("/prompts/templates", adminControllers.UpdatePromptTemplate)
 	}
 }

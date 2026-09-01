@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -28,6 +29,7 @@ type ChatPayload struct {
 	IsPriority bool            `json:"is_priority,omitempty"`
 	Response   json.RawMessage `json:"response,omitempty"`
 	StatusCode int             `json:"status_code,omitempty"`
+	TraceID    string          `json:"trace_id,omitempty"`
 }
 
 func Enqueue(queueName string, payload []byte) error {
@@ -120,4 +122,84 @@ func PushPending(userID uint, uuid string) error {
 func PopPending(userID uint) (string, error) {
 	key := fmt.Sprintf("ai-chat-pending:%d", userID)
 	return RedisClient.LPop(RedisCtx, key).Result()
+}
+
+// ─── Fase 3: Streaming SSE via Redis Pub/Sub + buffer ───
+
+type StreamChunk struct {
+	UUID         string  `json:"uuid"`
+	Delta        string  `json:"delta"`
+	Index        int     `json:"index"`
+	FinishReason *string `json:"finish_reason,omitempty"`
+}
+
+const streamBufTTL = 5 * time.Minute
+const streamBufMax = 1000
+
+func streamChannel(uuid string) string {
+	return "chat:stream:" + uuid
+}
+
+func streamBufKey(uuid string) string {
+	return "chat:stream:buf:" + uuid
+}
+
+func PublishStream(uuid string, delta string) error {
+	if delta == "" {
+		return nil
+	}
+	// PUBLISH for live subscribers
+	_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), delta).Err()
+	// Buffer for replay (LPUSH + LTRIM + EXPIRE)
+	pipe := RedisClient.Pipeline()
+	pipe.LPush(RedisCtx, streamBufKey(uuid), delta)
+	pipe.LTrim(RedisCtx, streamBufKey(uuid), 0, streamBufMax-1)
+	pipe.Expire(RedisCtx, streamBufKey(uuid), streamBufTTL)
+	_, _ = pipe.Exec(RedisCtx)
+	return nil
+}
+
+func PublishStreamDone(uuid string) error {
+	_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), "[DONE]").Err()
+	return nil
+}
+
+func GetStreamBuffer(uuid string) []string {
+	vals, err := RedisClient.LRange(RedisCtx, streamBufKey(uuid), 0, -1).Result()
+	if err != nil {
+		return nil
+	}
+	// LPUSH stores newest first, reverse to chronological
+	for i, j := 0, len(vals)-1; i < j; i, j = i+1, j-1 {
+		vals[i], vals[j] = vals[j], vals[i]
+	}
+	return vals
+}
+
+func SubscribeStream(ctx context.Context, uuid string) <-chan string {
+	ch := make(chan string, 100)
+	pubsub := RedisClient.Subscribe(ctx, streamChannel(uuid))
+	go func() {
+		defer close(ch)
+		defer pubsub.Close()
+		// Ensure subscription is ready
+		_, _ = pubsub.Receive(ctx)
+		msgCh := pubsub.Channel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-msgCh:
+				if !ok {
+					return
+				}
+				select {
+				case ch <- msg.Payload:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return ch
 }
