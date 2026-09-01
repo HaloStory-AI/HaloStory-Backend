@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -1154,10 +1155,42 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		}
 	}
 
-	openaiResp, statusCode, err := byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
-	if err != nil {
-		log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
-		markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+	var openaiResp *byok.OpenAICompatResponse
+	var statusCode int
+	// Fase 3: try streaming if enabled (USE_STREAMING != false)
+	if os.Getenv("USE_STREAMING") != "false" {
+		streamClient := utils.NewAIHttpClientNoTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+		// publish streaming deltas
+		resp, code, cerr := byok.CallOpenAIStream(ctx, streamClient, decryptedKey, baseURL, model, reqPayload, openAIOpts, func(delta string) error {
+			_ = services.PublishStream(uuid, delta)
+			return nil
+		})
+		cancel()
+		if cerr == nil && resp != nil {
+			openaiResp = resp
+			statusCode = code
+			_ = services.PublishStreamDone(uuid)
+		} else {
+			// fallback to non-stream
+			openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
+			if err != nil {
+				log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
+				markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+				return
+			}
+		}
+	} else {
+		openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 120*time.Second, openAIOpts)
+		if err != nil {
+			log.Printf("Worker: OpenAI API error for %s: %v (status %d)", uuid, err, statusCode)
+			markError(uuid, storeKey, "OpenAI API error: "+err.Error(), statusCode)
+			return
+		}
+	}
+	if openaiResp == nil {
+		log.Printf("Worker: OpenAI API error for %s: nil response (status %d)", uuid, statusCode)
+		markError(uuid, storeKey, "OpenAI API error: nil response", statusCode)
 		return
 	}
 
