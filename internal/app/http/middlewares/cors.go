@@ -11,8 +11,8 @@ func SetupCORS() gin.HandlerFunc {
 	return cors.New(cors.Config{
 		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With"},
-		ExposeHeaders:    []string{"Content-Length", "Content-Type"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Request-Id", "X-Trace-Id"},
+		ExposeHeaders:    []string{"Content-Length", "Content-Type", "X-Request-Id", "X-Trace-Id"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	})

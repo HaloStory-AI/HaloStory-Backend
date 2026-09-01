@@ -9,6 +9,7 @@ import (
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/services/llm"
 	"halostory_go_backend/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ type OpenAIProviderRequest struct {
 	UserPersona       *string                 `json:"user_persona,omitempty"`
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
+	ContextLimit      *int                    `json:"context_limit,omitempty"`
 }
 
 func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, provider, defaultModel string) {
@@ -59,6 +61,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	if model == "" {
 		model = defaultModel
 	}
+
+	// Fase 2: registry validate (non-blocking, log only)
+	_ = llm.Default.Validate(provider, model, nil)
 
 	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
 		Messages:          req.Messages,
@@ -85,6 +90,7 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		BotIDs:            req.BotIDs,
 		ExistingMemories:  req.ExistingMemories,
 		BotID:             req.BotID,
+		ContextLimit:      req.ContextLimit,
 		SourceIP:          c.ClientIP(),
 	}); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -114,6 +120,15 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := map[string]interface{}{
 		"uuid":     uid,
@@ -124,6 +139,7 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		"model":    model,
 		"provider": provider,
 		"user_id":  user.ID,
+		"trace_id": traceID,
 	}
 
 	if req.Temperature != nil {
@@ -191,6 +207,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	}
 	if len(req.ExistingMemories) > 0 {
 		payload["existing_memories"] = req.ExistingMemories
+	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

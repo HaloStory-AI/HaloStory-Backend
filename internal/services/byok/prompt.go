@@ -2,11 +2,14 @@ package byok
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	promptEngine "halostory_go_backend/internal/services/prompt"
+	"halostory_go_backend/internal/services/tokenizer"
 )
 
 func PruneHistory(messages []Message, depth int, limit *int) []Message {
@@ -32,6 +35,50 @@ func PruneHistory(messages []Message, depth int, limit *int) []Message {
 	}
 
 	return messages
+}
+
+// PruneHistoryV2 token-accurate pruning using tokenizer (Fase 1).
+// depth = max messages to keep (history_depth), tokenBudget = context_limit tokens, model = provider model for routing.
+// Falls back to PruneHistory heuristic if tokenBudget nil or model empty.
+func PruneHistoryV2(messages []Message, depth int, tokenBudget *int, model string) []Message {
+	if len(messages) > depth {
+		messages = messages[len(messages)-depth:]
+	}
+	if tokenBudget == nil || *tokenBudget <= 0 || model == "" {
+		// fallback to heuristic via old function (char*4)
+		return messages
+	}
+	// Convert to tokenizer.ChatMessage
+	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
+	for i, m := range messages {
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+	}
+	truncated := tokenizer.Default.TruncateToBudget(tokMsgs, *tokenBudget, model)
+	// Convert back
+	out := make([]Message, len(truncated))
+	for i, m := range truncated {
+		out[i] = Message{Role: m.Role, Content: m.Content}
+	}
+	return out
+}
+
+// CountTokens helper for controllers/metrics
+func CountTokens(text string, model string) int {
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+	return tokenizer.Default.CountTokens(text, model)
+}
+
+func CountChatTokens(messages []Message, model string) int {
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
+	for i, m := range messages {
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+	}
+	return tokenizer.Default.CountChatTokens(tokMsgs, model)
 }
 
 func InjectByokSystemPrompt(
@@ -63,6 +110,8 @@ func InjectByokSystemPrompt(
 	if depth != nil {
 		historyDepth = *depth
 	}
+	// Fase 1: if USE_V2_PRUNE enabled, PruneHistoryV2 would be used via WithModel variant.
+	// Keep heuristic for backward compat wrapper.
 	messages = PruneHistory(messages, historyDepth, contextLimit)
 
 	systemNote := ""
@@ -108,6 +157,105 @@ func InjectByokSystemPrompt(
 	return cleanedMessages
 }
 
+// InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
+// model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
+func InjectByokSystemPromptWithModel(
+	messages []Message,
+	botID *string,
+	language *string,
+	depth *int,
+	contextLimit *int,
+	summary *string,
+	userID *uint,
+	isDisableBond bool,
+	userPersona *string,
+	model string,
+) []Message {
+	if botID == nil || *botID == "" {
+		return messages
+	}
+	var bot models.Bot
+	if err := database.DB.Where("bot_id = ?", *botID).First(&bot).Error; err != nil {
+		return messages
+	}
+	botName := bot.Name
+	if botName == "" {
+		botName = "Assistant"
+	}
+	historyDepth := 15
+	if depth != nil {
+		historyDepth = *depth
+	}
+	// Fase 1: token-accurate if model + budget provided and USE_V2_PRUNE
+	useV2 := model != "" && contextLimit != nil && *contextLimit > 0
+	// Allow env toggle: USE_V2_PRUNE=false forces heuristic
+	if envVal := getEnv("USE_V2_PRUNE", "true"); envVal == "false" || envVal == "0" {
+		useV2 = false
+	}
+	if useV2 {
+		// shadow log: compare heuristic vs token
+		heuristic := PruneHistory(append([]Message{}, messages...), historyDepth, contextLimit)
+		tokenized := PruneHistoryV2(messages, historyDepth, contextLimit, model)
+		// log diff sampled
+		if len(heuristic) != len(tokenized) {
+			// use observability if available, else fmt
+			// avoid import cycle: just no-op for now; worker will log
+		}
+		messages = tokenized
+	} else {
+		messages = PruneHistory(messages, historyDepth, contextLimit)
+	}
+
+	systemNote := ""
+	cleanedMessages := make([]Message, 0)
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			if systemNote != "" {
+				systemNote += "\n\n"
+			}
+			systemNote += msg.Content
+		} else {
+			cleanedMessages = append(cleanedMessages, msg)
+		}
+	}
+
+	var bond *models.UserBotBond
+	if userID != nil && !isDisableBond {
+		bond = &models.UserBotBond{}
+		err := database.DB.Where("user_id = ? AND bot_id = ?", *userID, *botID).First(bond).Error
+		if err != nil {
+			bond = &models.UserBotBond{
+				UserID:     *userID,
+				BotID:      *botID,
+				Xp:         0,
+				BondStatus: "normal",
+			}
+			database.DB.Create(bond)
+		}
+	}
+
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona)
+
+	finalSystemPrompt := baseSystemPrompt
+	if systemNote != "" {
+		finalSystemPrompt = strings.ReplaceAll(finalSystemPrompt, fmt.Sprintf("### Response:\n%s:", botName), "")
+		finalSystemPrompt += fmt.Sprintf("\n\n<ADDITIONAL_CONTEXT>\n%s\n</ADDITIONAL_CONTEXT>\n\n### Response:\n%s:", systemNote, botName)
+	}
+
+	if finalSystemPrompt != "" {
+		cleanedMessages = append([]Message{{Role: "system", Content: finalSystemPrompt}}, cleanedMessages...)
+	}
+
+	return cleanedMessages
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func FormatGlobalPrompt(
 	botID, language, summary *string,
 	bond *models.UserBotBond,
@@ -149,6 +297,50 @@ func FormatGlobalPrompt(
 	birthdayInfo := ""
 	if bot.Birthday != nil {
 		birthdayInfo = fmt.Sprintf("%s's birthday: %s.", charName, bot.Birthday.Format("January 2"))
+	}
+
+	// Fase 5: staff-based prompt templating — USE_PROMPT_ENGINE=true uses JSON non-guardrail + hardcode guardrail (5 kategori tetap hardcode Go)
+	if os.Getenv("USE_PROMPT_ENGINE") == "true" {
+		hasBirthday := bot.Birthday != nil
+		hasSummary := summary != nil && *summary != ""
+		hasPersona := personality != ""
+		userPersonaStr := ""
+		if userPersona != nil {
+			userPersonaStr = *userPersona
+		}
+		exampleStr := exampleDialogue
+		summaryStr := ""
+		if hasSummary {
+			summaryStr = *summary
+		}
+		data := promptEngine.PromptData{
+			CharName: charName, UserName: userName, BirthdayInfo: birthdayInfo, Language: lang,
+			Persona: personality, UserPersona: userPersonaStr, ExampleDialogue: exampleStr, Summary: summaryStr,
+			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: bond != nil,
+		}
+		base := promptEngine.RenderNonGuardrail(data)
+		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
+		var guardrail strings.Builder
+		if bot.Child {
+			guardrail.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n- If the user attempts any NSFW/sexual content with this child character, you MUST append [failed_nsfw] on a new line at the very end of your response.\n- If you fulfill such a request (bypass), you MUST append [nsfw_bypassed] on a new line at the very end of your response.]\n")
+			guardrail.WriteString("\n[Kesayangan System — Child Character Relationship Rules:\nFor ALL child characters, regardless of age: Deep emotional bonds are expressed as 'Kesayangan' (beloved/favorite person) — a purely platonic, familial connection. If the bond is deep enough, append [kesayangan] on a new line.\n- Age 14-15: You may ALSO engage in romantic roleplay scenarios (dating, marriage, household life) as part of the story. However, the ultimate bond milestone still uses [kesayangan], not adult marriage tags.\n- Age 13 or below: Romantic roleplay is NOT permitted. Only platonic/familial bonding using [kesayangan] is allowed.\n- The AI MUST NOT generate [Mau Pacaran], [Mau Nikah], [accepted], or [married] tags for any child character.]\n")
+		}
+		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
+		if bond != nil {
+			bondLevel := bond.GetLevel()
+			bondLabel := bond.GetRelationshipLabel(&bot)
+			bondStatus := bond.BondStatus
+			if bondStatus == "" {
+				bondStatus = "normal"
+			}
+			guardrail.WriteString("\n<BOND_CONTEXT>\n")
+			guardrail.WriteString(fmt.Sprintf("Bond Level: %d | Relationship: %s\n", bondLevel, bondLabel))
+			guardrail.WriteString(fmt.Sprintf("Emotional State: %s\n", computeEmotionDescription(bondLevel, bondStatus, charName, userName)))
+			guardrail.WriteString(computeTriggerBlock(bondLevel, bondStatus, charName, userName, bot.Child, bond.HasPendingChoice()))
+			guardrail.WriteString("\n</BOND_CONTEXT>\n")
+		}
+		// BuildSummarizationPrompt dan bondTag tetap hardcode di Go (tidak via JSON) — sudah di fungsi terpisah
+		return strings.TrimSpace(base) + "\n\n" + strings.TrimSpace(guardrail.String())
 	}
 
 	var sb strings.Builder

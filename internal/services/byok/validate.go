@@ -40,6 +40,7 @@ type BYOKRequest struct {
 	TopA             *float64         `json:"top_a,omitempty"`
 	MinP             *float64         `json:"min_p,omitempty"`
 	RepetitionPenalty *float64        `json:"repetition_penalty,omitempty"`
+	ContextLimit     *int             `json:"context_limit,omitempty"`
 	SourceIP         string           `json:"-"`
 }
 
@@ -186,6 +187,7 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 		"response_length": {1, 32000},
 		"top_k":           {0, 500},
 		"history_depth":   {1, 500},
+		"context_limit":   {1, 128000},
 	}
 
 	if req.MaxTokens != nil {
@@ -208,6 +210,12 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 	}
 	if req.HistoryDepth != nil {
 		if err := checkInt("history_depth", *req.HistoryDepth, intChecks["history_depth"]); err != nil {
+			logValidationFailure(req, err)
+			return err
+		}
+	}
+	if req.ContextLimit != nil {
+		if err := checkInt("context_limit", *req.ContextLimit, intChecks["context_limit"]); err != nil {
 			logValidationFailure(req, err)
 			return err
 		}

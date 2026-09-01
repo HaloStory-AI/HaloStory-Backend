@@ -54,8 +54,18 @@ func MockChat(c *gin.Context) {
 	}
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := buildMockPayload(req, user.ID, uid, model)
+	payload["trace_id"] = traceID
 	payloadJSON, _ := json.Marshal(payload)
 
 	if err := services.StoreChatResult(uid, payloadJSON, 10*time.Minute); err != nil {
