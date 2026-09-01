@@ -28,6 +28,7 @@ type ChatPayload struct {
 	IsPriority bool            `json:"is_priority,omitempty"`
 	Response   json.RawMessage `json:"response,omitempty"`
 	StatusCode int             `json:"status_code,omitempty"`
+	TraceID    string          `json:"trace_id,omitempty"`
 }
 
 func Enqueue(queueName string, payload []byte) error {

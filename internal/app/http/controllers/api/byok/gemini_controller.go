@@ -64,8 +64,18 @@ func GeminiChat(c *gin.Context) {
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := buildPayload(req, encryptedKey, messagesB64, user.ID, uid)
+	payload["trace_id"] = traceID
 
 	payloadJSON, _ := json.Marshal(payload)
 

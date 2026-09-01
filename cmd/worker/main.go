@@ -18,6 +18,7 @@ import (
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/services/observability"
 	"halostory_go_backend/internal/services/systemai"
 	"halostory_go_backend/internal/utils"
 )
@@ -56,6 +57,7 @@ type chatData struct {
 	Reasoning        *reasoningConfig `json:"reasoning,omitempty"`
 	Stop             []string         `json:"stop,omitempty"`
 	ResponseLength   float64          `json:"response_length,omitempty"`
+	TraceID          string           `json:"trace_id,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -91,20 +93,25 @@ func dispatchJob(data []byte, sem chan struct{}, goroutineName string) {
 	sem <- struct{}{}
 	go func(d []byte) {
 		var jobUUID string
+		var jobTraceID string
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("Worker: RECOVERED panic in %s goroutine: %v", goroutineName, r)
+				observability.Error("worker.panic", "goroutine", goroutineName, "error", fmt.Sprintf("%v", r), "uuid", jobUUID, "trace_id", jobTraceID)
 				if jobUUID != "" {
 					markError(jobUUID, "chat:"+jobUUID, "Internal worker panic: "+fmt.Sprintf("%v", r), 500)
 				}
 			}
 			<-sem
 		}()
-		// Pre-extract uuid for panic recovery
+		// Pre-extract uuid/trace_id for panic recovery
 		var rawPayload map[string]interface{}
 		if json.Unmarshal(d, &rawPayload) == nil {
 			if u, ok := rawPayload["uuid"].(string); ok {
 				jobUUID = u
+			}
+			if tid, ok := rawPayload["trace_id"].(string); ok {
+				jobTraceID = tid
 			}
 		}
 		processJob(d)
@@ -113,6 +120,7 @@ func dispatchJob(data []byte, sem chan struct{}, goroutineName string) {
 
 func main() {
 	config.LoadConfig()
+	observability.InitLogger()
 	database.Connect()
 	services.InitRedis()
 
@@ -174,6 +182,7 @@ func main() {
 }
 
 func processJob(rawData []byte) {
+	start := time.Now()
 	var payload map[string]interface{}
 	if err := json.Unmarshal(rawData, &payload); err != nil {
 		log.Printf("Worker: Failed to parse job payload: %v", err)
@@ -181,9 +190,13 @@ func processJob(rawData []byte) {
 	}
 
 	uuid, _ := payload["uuid"].(string)
+	traceID, _ := payload["trace_id"].(string)
 	if uuid == "" {
 		log.Printf("Worker: Missing uuid in payload")
 		return
+	}
+	if traceID != "" && observability.ShouldSample() {
+		observability.Info("worker.job.start", "trace_id", traceID, "uuid", uuid, "provider", payload["provider"])
 	}
 
 	storeKey := "chat:" + uuid
@@ -224,6 +237,13 @@ func processJob(rawData []byte) {
 	default:
 		log.Printf("Worker: Unsupported provider %s for UUID %s", data.Provider, uuid)
 		markError(uuid, storeKey, "Unsupported provider: "+data.Provider, 400)
+	}
+
+	latency := time.Since(start)
+	observability.ObserveLatency(data.Provider, latency)
+	observability.IncRequest(data.Provider, data.Model, "completed")
+	if traceID != "" {
+		observability.Info("worker.job.done", "trace_id", traceID, "uuid", uuid, "provider", data.Provider, "model", data.Model, "latency_ms", latency.Milliseconds())
 	}
 }
 
@@ -771,6 +791,15 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 		"status":      "completed",
 		"response":    response,
 		"status_code": statusCode,
+	}
+	// Preserve trace_id from original payload if exists
+	if existing, err := services.GetChatResult(uuid); err == nil {
+		var existingMap map[string]interface{}
+		if json.Unmarshal(existing, &existingMap) == nil {
+			if tid, ok := existingMap["trace_id"].(string); ok && tid != "" {
+				payload["trace_id"] = tid
+			}
+		}
 	}
 	jsonBytes, _ := json.Marshal(payload)
 	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)

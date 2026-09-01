@@ -29,6 +29,11 @@ func ChatStatus(c *gin.Context) {
 		return
 	}
 
+	if tid, ok := result["trace_id"].(string); ok && tid != "" {
+		c.Header("X-Trace-Id", tid)
+		c.Header("X-Request-Id", tid)
+	}
+
 	status, _ := result["status"].(string)
 	if status == "completed" {
 		statusCode := http.StatusOK

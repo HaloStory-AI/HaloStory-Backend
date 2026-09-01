@@ -114,6 +114,15 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := map[string]interface{}{
 		"uuid":     uid,
@@ -124,6 +133,7 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		"model":    model,
 		"provider": provider,
 		"user_id":  user.ID,
+		"trace_id": traceID,
 	}
 
 	if req.Temperature != nil {

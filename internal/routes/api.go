@@ -9,6 +9,7 @@ import (
 	"halostory_go_backend/internal/app/http/middlewares"
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
+	"halostory_go_backend/internal/services/observability"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/oauth2"
@@ -16,6 +17,11 @@ import (
 
 // SetupAPI mendaftarkan semua route untuk aplikasi
 func SetupAPI(r *gin.Engine) {
+	// Observability: metrics endpoint (public, Prometheus-compatible)
+	r.GET("/metrics", observability.MetricsHandler)
+	apiMetrics := r.Group("/api")
+	apiMetrics.GET("/metrics", observability.MetricsHandler)
+
 	// Membuat grup route untuk /api
 	api := r.Group("/api")
 

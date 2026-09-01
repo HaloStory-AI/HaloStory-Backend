@@ -12,6 +12,7 @@ import (
 	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/routes"
 	"halostory_go_backend/internal/services"
+	"halostory_go_backend/internal/services/observability"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,8 +36,12 @@ func main() {
 	// Set Gin mode (default release — set GIN_MODE=debug di .env untuk dev)
 	gin.SetMode(config.Env("GIN_MODE", "release"))
 
+	// Init observability (slog JSON handler)
+	observability.InitLogger()
+
 	// Inisialisasi instance Gin baru dengan middleware global
 	r := gin.New()
+	r.Use(observability.RequestIDMiddleware())
 	r.Use(gin.Logger())
 	r.Use(gin.Recovery())
 	r.Use(middlewares.SetupCORS())

@@ -82,6 +82,16 @@ func SystemChat(c *gin.Context) {
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	// Fase 0: trace_id propagation (X-Request-Id -> payload trace_id, echo headers)
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := map[string]interface{}{
 		"uuid":          uid,
@@ -91,6 +101,7 @@ func SystemChat(c *gin.Context) {
 		"user_id":       user.ID,
 		"bot_id":        req.BotID,
 		"is_priority":   user.Role == "vip",
+		"trace_id":      traceID,
 	}
 
 	if req.Language != nil {
@@ -211,6 +222,15 @@ func Summarize(c *gin.Context) {
 	messagesB64 := base64.StdEncoding.EncodeToString(messagesJSON)
 
 	uid := uuid.New().String()
+	traceID := c.GetHeader("X-Request-Id")
+	if traceID == "" {
+		traceID = c.GetHeader("X-Trace-Id")
+	}
+	if traceID == "" {
+		traceID = uid
+	}
+	c.Header("X-Request-Id", traceID)
+	c.Header("X-Trace-Id", traceID)
 
 	payload := map[string]interface{}{
 		"uuid":          uid,
@@ -221,6 +241,7 @@ func Summarize(c *gin.Context) {
 		"bot_id":        req.BotID,
 		"is_summarize":  true,
 		"is_priority":   user.Role == "vip",
+		"trace_id":      traceID,
 	}
 
 	language := "id"
