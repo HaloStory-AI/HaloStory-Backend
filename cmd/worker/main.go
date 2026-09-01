@@ -58,6 +58,7 @@ type chatData struct {
 	Stop             []string         `json:"stop,omitempty"`
 	ResponseLength   float64          `json:"response_length,omitempty"`
 	TraceID          string           `json:"trace_id,omitempty"`
+	ContextLimit     float64          `json:"context_limit,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -284,7 +285,10 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -320,9 +324,10 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
-	messages = byok.InjectByokSystemPrompt(
+	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		data.Model,
 	)
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
@@ -606,6 +611,13 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 	if maxTokens == 0 {
 		maxTokens = systemai.DefaultMaxTokens
 	}
+	var contextLimit *int
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else {
+		contextLimit = &maxTokens
+	}
 
 	isVip := false
 	var user models.User
@@ -642,9 +654,19 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 		userPersona = &data.UserPersona
 	}
 
-	messages = byok.InjectByokSystemPrompt(
-		messages, &botID, &lang, &historyDepth, &maxTokens,
+	// Fase 1: use token-accurate model (system router uses Free_User/VIP_User pseudo model for routing)
+	sysModel := data.Model
+	if sysModel == "" {
+		if isVip {
+			sysModel = "system-vip"
+		} else {
+			sysModel = "system-free"
+		}
+	}
+	messages = byok.InjectByokSystemPromptWithModel(
+		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		sysModel,
 	)
 
 	if data.IsGroup && len(data.BotIDs) > 1 {
@@ -989,7 +1011,10 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -1029,9 +1054,10 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 	}
 
 	if shouldInject {
-		messages = byok.InjectByokSystemPrompt(
+		messages = byok.InjectByokSystemPromptWithModel(
 			messages, &botID, &lang, &historyDepth, contextLimit,
 			summary, &userID, data.IsDisableBond, userPersona,
+			model,
 		)
 
 		if data.IsGroup && len(data.BotIDs) > 1 {
@@ -1283,7 +1309,10 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 		maxTokens = 2048
 	}
 	var contextLimit *int
-	if maxTokens > 0 {
+	if data.ContextLimit > 0 {
+		cl := int(data.ContextLimit)
+		contextLimit = &cl
+	} else if maxTokens > 0 {
 		contextLimit = &maxTokens
 	}
 	var summary *string
@@ -1319,9 +1348,10 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 		return
 	}
 
-	messages = byok.InjectByokSystemPrompt(
+	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
 		summary, &userID, data.IsDisableBond, userPersona,
+		data.Model,
 	)
 
 	if data.IsGroup && len(data.BotIDs) > 1 {

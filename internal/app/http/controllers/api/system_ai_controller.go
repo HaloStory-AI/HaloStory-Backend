@@ -33,6 +33,7 @@ type SystemChatRequest struct {
 	ExistingMemories []string                 `json:"existing_memories,omitempty"`
 	Stop             []string                 `json:"stop,omitempty"`
 	ReasoningEnabled *bool                    `json:"reasoning_enabled,omitempty"`
+	ContextLimit     *int                     `json:"context_limit,omitempty"`
 }
 
 type SummarizeRequest struct {
@@ -127,6 +128,9 @@ func SystemChat(c *gin.Context) {
 	}
 	if req.HistoryDepth != nil {
 		payload["history_depth"] = *req.HistoryDepth
+	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup

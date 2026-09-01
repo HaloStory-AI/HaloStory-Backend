@@ -42,6 +42,7 @@ type OpenAICompatibleChatRequest struct {
 	UserPersona       *string                 `json:"user_persona,omitempty"`
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
+	ContextLimit      *int                    `json:"context_limit,omitempty"`
 }
 
 func OpenAICompatibleChat(c *gin.Context) {
@@ -97,6 +98,7 @@ func OpenAICompatibleChat(c *gin.Context) {
 		BotIDs:            req.BotIDs,
 		ExistingMemories:  req.ExistingMemories,
 		BotID:             req.BotID,
+		ContextLimit:      req.ContextLimit,
 		SourceIP:          c.ClientIP(),
 	}); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -239,6 +241,9 @@ func buildOpenAIPayload(req OpenAICompatibleChatRequest, encryptedKey, messagesB
 	}
 	if len(req.ExistingMemories) > 0 {
 		payload["existing_memories"] = req.ExistingMemories
+	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
 	}
 	return payload
 }

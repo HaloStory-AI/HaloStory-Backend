@@ -41,6 +41,7 @@ type OpenAIProviderRequest struct {
 	UserPersona       *string                 `json:"user_persona,omitempty"`
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
+	ContextLimit      *int                    `json:"context_limit,omitempty"`
 }
 
 func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, provider, defaultModel string) {
@@ -85,6 +86,7 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		BotIDs:            req.BotIDs,
 		ExistingMemories:  req.ExistingMemories,
 		BotID:             req.BotID,
+		ContextLimit:      req.ContextLimit,
 		SourceIP:          c.ClientIP(),
 	}); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -201,6 +203,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	}
 	if len(req.ExistingMemories) > 0 {
 		payload["existing_memories"] = req.ExistingMemories
+	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

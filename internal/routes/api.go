@@ -162,6 +162,9 @@ func SetupAPI(r *gin.Engine) {
 		verified.POST("/ai/chat/system", apiControllers.SystemChat)
 		verified.POST("/ai/summarize", apiControllers.Summarize)
 		verified.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
+		// Fase 1: tokenizer debug
+		verified.GET("/ai/tokenize", apiControllers.Tokenize)
+		verified.POST("/ai/tokenize", apiControllers.Tokenize)
 
 		// ─── Call ( WEBRTC ) - Belum di Implementasi ───
 		// verified.GET("")

@@ -171,5 +171,8 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 	if len(req.ExistingMemories) > 0 {
 		payload["existing_memories"] = req.ExistingMemories
 	}
+	if req.ContextLimit != nil {
+		payload["context_limit"] = *req.ContextLimit
+	}
 	return payload
 }

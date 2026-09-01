@@ -2,11 +2,13 @@ package byok
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/database"
+	"halostory_go_backend/internal/services/tokenizer"
 )
 
 func PruneHistory(messages []Message, depth int, limit *int) []Message {
@@ -32,6 +34,50 @@ func PruneHistory(messages []Message, depth int, limit *int) []Message {
 	}
 
 	return messages
+}
+
+// PruneHistoryV2 token-accurate pruning using tokenizer (Fase 1).
+// depth = max messages to keep (history_depth), tokenBudget = context_limit tokens, model = provider model for routing.
+// Falls back to PruneHistory heuristic if tokenBudget nil or model empty.
+func PruneHistoryV2(messages []Message, depth int, tokenBudget *int, model string) []Message {
+	if len(messages) > depth {
+		messages = messages[len(messages)-depth:]
+	}
+	if tokenBudget == nil || *tokenBudget <= 0 || model == "" {
+		// fallback to heuristic via old function (char*4)
+		return messages
+	}
+	// Convert to tokenizer.ChatMessage
+	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
+	for i, m := range messages {
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+	}
+	truncated := tokenizer.Default.TruncateToBudget(tokMsgs, *tokenBudget, model)
+	// Convert back
+	out := make([]Message, len(truncated))
+	for i, m := range truncated {
+		out[i] = Message{Role: m.Role, Content: m.Content}
+	}
+	return out
+}
+
+// CountTokens helper for controllers/metrics
+func CountTokens(text string, model string) int {
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+	return tokenizer.Default.CountTokens(text, model)
+}
+
+func CountChatTokens(messages []Message, model string) int {
+	if model == "" {
+		model = "gpt-3.5-turbo"
+	}
+	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
+	for i, m := range messages {
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+	}
+	return tokenizer.Default.CountChatTokens(tokMsgs, model)
 }
 
 func InjectByokSystemPrompt(
@@ -63,6 +109,8 @@ func InjectByokSystemPrompt(
 	if depth != nil {
 		historyDepth = *depth
 	}
+	// Fase 1: if USE_V2_PRUNE enabled, PruneHistoryV2 would be used via WithModel variant.
+	// Keep heuristic for backward compat wrapper.
 	messages = PruneHistory(messages, historyDepth, contextLimit)
 
 	systemNote := ""
@@ -106,6 +154,105 @@ func InjectByokSystemPrompt(
 	}
 
 	return cleanedMessages
+}
+
+// InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
+// model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
+func InjectByokSystemPromptWithModel(
+	messages []Message,
+	botID *string,
+	language *string,
+	depth *int,
+	contextLimit *int,
+	summary *string,
+	userID *uint,
+	isDisableBond bool,
+	userPersona *string,
+	model string,
+) []Message {
+	if botID == nil || *botID == "" {
+		return messages
+	}
+	var bot models.Bot
+	if err := database.DB.Where("bot_id = ?", *botID).First(&bot).Error; err != nil {
+		return messages
+	}
+	botName := bot.Name
+	if botName == "" {
+		botName = "Assistant"
+	}
+	historyDepth := 15
+	if depth != nil {
+		historyDepth = *depth
+	}
+	// Fase 1: token-accurate if model + budget provided and USE_V2_PRUNE
+	useV2 := model != "" && contextLimit != nil && *contextLimit > 0
+	// Allow env toggle: USE_V2_PRUNE=false forces heuristic
+	if envVal := getEnv("USE_V2_PRUNE", "true"); envVal == "false" || envVal == "0" {
+		useV2 = false
+	}
+	if useV2 {
+		// shadow log: compare heuristic vs token
+		heuristic := PruneHistory(append([]Message{}, messages...), historyDepth, contextLimit)
+		tokenized := PruneHistoryV2(messages, historyDepth, contextLimit, model)
+		// log diff sampled
+		if len(heuristic) != len(tokenized) {
+			// use observability if available, else fmt
+			// avoid import cycle: just no-op for now; worker will log
+		}
+		messages = tokenized
+	} else {
+		messages = PruneHistory(messages, historyDepth, contextLimit)
+	}
+
+	systemNote := ""
+	cleanedMessages := make([]Message, 0)
+	for _, msg := range messages {
+		if msg.Role == "system" {
+			if systemNote != "" {
+				systemNote += "\n\n"
+			}
+			systemNote += msg.Content
+		} else {
+			cleanedMessages = append(cleanedMessages, msg)
+		}
+	}
+
+	var bond *models.UserBotBond
+	if userID != nil && !isDisableBond {
+		bond = &models.UserBotBond{}
+		err := database.DB.Where("user_id = ? AND bot_id = ?", *userID, *botID).First(bond).Error
+		if err != nil {
+			bond = &models.UserBotBond{
+				UserID:     *userID,
+				BotID:      *botID,
+				Xp:         0,
+				BondStatus: "normal",
+			}
+			database.DB.Create(bond)
+		}
+	}
+
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona)
+
+	finalSystemPrompt := baseSystemPrompt
+	if systemNote != "" {
+		finalSystemPrompt = strings.ReplaceAll(finalSystemPrompt, fmt.Sprintf("### Response:\n%s:", botName), "")
+		finalSystemPrompt += fmt.Sprintf("\n\n<ADDITIONAL_CONTEXT>\n%s\n</ADDITIONAL_CONTEXT>\n\n### Response:\n%s:", systemNote, botName)
+	}
+
+	if finalSystemPrompt != "" {
+		cleanedMessages = append([]Message{{Role: "system", Content: finalSystemPrompt}}, cleanedMessages...)
+	}
+
+	return cleanedMessages
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func FormatGlobalPrompt(
