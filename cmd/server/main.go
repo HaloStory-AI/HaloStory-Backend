@@ -46,11 +46,12 @@ func main() {
 
 	// Route dasar untuk memastikan server berjalan
 	r.GET("/", func(c *gin.Context) {
-		// c.String(200, "Halo dari Gin! Routing terpisah berhasil.")
-		c.JSON(200, gin.H{
-			"success": true,
-			"message": "Halo dari Gin! Routing terpisah berhasil.",
-		})
+		c.File("internal/templates/index.html")
+	})
+
+	// Handle 404 Not Found
+	r.NoRoute(func(c *gin.Context) {
+		c.File("internal/templates/404.html")
 	})
 
 	r.GET("/up", func(c *gin.Context) {
