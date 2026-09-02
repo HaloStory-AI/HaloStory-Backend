@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"text/template"
 )
 
@@ -41,24 +42,46 @@ type PromptData struct {
 
 var defaultItems []PromptItem
 var defaultLoaded bool
+var mu sync.RWMutex
 
-func LoadDefault() []PromptItem {
-	if defaultLoaded && len(defaultItems) > 0 {
-		return defaultItems
+func defaultPaths() []string {
+	if p := os.Getenv("PROMPTS_PATH"); p != "" {
+		return []string{p, "configs/prompts/default.json", "./configs/prompts/default.json", filepath.Join(filepath.Dir(os.Args[0]), "configs/prompts/default.json")}
 	}
-	// try configs/prompts/default.json
-	paths := []string{
+	return []string{
 		"configs/prompts/default.json",
 		"./configs/prompts/default.json",
 		filepath.Join(filepath.Dir(os.Args[0]), "configs/prompts/default.json"),
 	}
+}
+
+// SetDefaultCache updates in-memory cache (called after SaveDefault)
+func setDefaultCache(items []PromptItem) {
+	mu.Lock()
+	defer mu.Unlock()
+	defaultItems = append([]PromptItem(nil), items...)
+	defaultLoaded = true
+}
+
+func LoadDefault() []PromptItem {
+	mu.RLock()
+	if defaultLoaded && len(defaultItems) > 0 {
+		cached := append([]PromptItem(nil), defaultItems...)
+		mu.RUnlock()
+		return cached
+	}
+	mu.RUnlock()
+	// try configs/prompts/default.json
+	paths := defaultPaths()
 	for _, p := range paths {
 		if b, err := os.ReadFile(p); err == nil {
 			var items []PromptItem
 			if json.Unmarshal(b, &items) == nil && len(items) > 0 {
+				mu.Lock()
 				defaultItems = items
 				defaultLoaded = true
-				return items
+				mu.Unlock()
+				return append([]PromptItem(nil), items...)
 			}
 		}
 	}
@@ -75,9 +98,11 @@ func LoadDefault() []PromptItem {
 		{Role: "system", Content: "{{.GroupContext}}", Condition: "hasGroup"},
 		{Role: "system", Content: "{{.LorebookInjection}}", Condition: "hasLorebook"},
 	}
+	mu.Lock()
 	defaultItems = fallback
 	defaultLoaded = true
-	return fallback
+	mu.Unlock()
+	return append([]PromptItem(nil), fallback...)
 }
 
 func evalCondition(cond string, data PromptData) bool {

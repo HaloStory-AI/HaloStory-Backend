@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -10,9 +12,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type listTemplatesResponse struct {
+	Templates []prompt.PromptItem `json:"templates"`
+}
+
+type renderResponse struct {
+	Rendered     string `json:"rendered"`
+	Tokens       int    `json:"tokens"`
+	ItemsRendered int   `json:"items_rendered"`
+}
+
+type saveResponse struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
 func ListPromptTemplates(c *gin.Context) {
 	items := prompt.LoadDefault()
-	c.JSON(http.StatusOK, gin.H{"templates": items})
+	if items == nil {
+		items = make([]prompt.PromptItem, 0)
+	}
+	c.JSON(http.StatusOK, listTemplatesResponse{Templates: items})
 }
 
 func RenderPromptPreview(c *gin.Context) {
@@ -31,13 +55,18 @@ func RenderPromptPreview(c *gin.Context) {
 		Items            []prompt.PromptItem `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
-	// block {{system}}
+	// block {{system}} and <script> in items
 	raw, _ := json.Marshal(body.Items)
-	if strings.Contains(strings.ToLower(string(raw)), "{{system") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "blocked pattern {{system}}"})
+	lower := strings.ToLower(string(raw))
+	if strings.Contains(lower, "{{system") {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "blocked pattern {{system}}"})
+		return
+	}
+	if strings.Contains(lower, "<script") {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "blocked pattern <script"})
 		return
 	}
 	items := body.Items
@@ -47,7 +76,7 @@ func RenderPromptPreview(c *gin.Context) {
 	// limit 8k per item
 	for _, it := range items {
 		if len(it.Content) > 8000 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "content too long >8000"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "content too long >8000"})
 			return
 		}
 	}
@@ -60,38 +89,49 @@ func RenderPromptPreview(c *gin.Context) {
 		HasGroup: body.GroupContext != "", HasLorebook: body.LorebookInjection != "", HasBond: body.BondLevel > 0,
 	}
 	rendered := prompt.Render(data, items)
-	c.JSON(http.StatusOK, gin.H{"rendered": rendered, "tokens": len(rendered)/4, "items_rendered": len(items)})
+	c.JSON(http.StatusOK, renderResponse{Rendered: rendered, Tokens: len(rendered) / 4, ItemsRendered: len(items)})
 }
 
 func UpdatePromptTemplate(c *gin.Context) {
-	var items []prompt.PromptItem
-	if err := c.ShouldBindJSON(&items); err != nil {
-		// try wrapper {templates: [...]}
-		var wrap struct { Templates []prompt.PromptItem `json:"templates"` }
-		if err2 := c.ShouldBindJSON(&wrap); err2 != nil || len(wrap.Templates) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		items = wrap.Templates
-	}
-	// validate
-	raw, _ := json.Marshal(items)
-	if strings.Contains(strings.ToLower(string(raw)), "{{system") {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "blocked pattern {{system}}"})
+	rawBody, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "failed to read body"})
 		return
 	}
-	for _, it := range items {
-		if len(it.Content) > 8000 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "content too long >8000"})
-			return
+	// restore body for potential re-read
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+
+	var items []prompt.PromptItem
+	var wrap struct {
+		Templates []prompt.PromptItem `json:"templates"`
+	}
+	// try array first
+	if err := json.Unmarshal(rawBody, &items); err != nil || len(items) == 0 {
+		// try wrapper
+		if err2 := json.Unmarshal(rawBody, &wrap); err2 != nil || len(wrap.Templates) == 0 {
+			// if raw is empty array "[]", treat as empty
+			if string(bytes.TrimSpace(rawBody)) == "[]" {
+				items = make([]prompt.PromptItem, 0)
+			} else {
+				msg := err.Error()
+				if err2 != nil {
+					msg = err2.Error()
+				}
+				c.JSON(http.StatusBadRequest, errorResponse{Error: msg})
+				return
+			}
+		} else {
+			items = wrap.Templates
 		}
-		if it.Content != "" && it.Content != strings.TrimSpace(it.Content) {
-			// allow
-		}
+	}
+	// validate via prompt.Validate (role/condition/block/len)
+	if err := prompt.Validate(items); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
 	}
 	if err := prompt.SaveDefault(items); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "saved", "count": len(items)})
+	c.JSON(http.StatusOK, saveResponse{Status: "saved", Count: len(items)})
 }
