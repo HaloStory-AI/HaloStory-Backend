@@ -46,6 +46,8 @@ var mu sync.RWMutex
 
 func defaultPaths() []string {
 	if p := os.Getenv("PROMPTS_PATH"); p != "" {
+		// If PROMPTS_PATH points to a dir or .md file, still include json fallbacks
+		// System.md is handled separately via LoadSystemMd()
 		return []string{p, "configs/prompts/default.json", "./configs/prompts/default.json", filepath.Join(filepath.Dir(os.Args[0]), "configs/prompts/default.json")}
 	}
 	return []string{
@@ -63,6 +65,16 @@ func setDefaultCache(items []PromptItem) {
 	defaultLoaded = true
 }
 
+var hardcodedConditionals = []PromptItem{
+	{Role: "system", Content: "{{.CharName}}'s Persona:\n{{.Persona}}", Condition: "hasPersona"},
+	{Role: "system", Content: "{{.UserName}}'s Persona:\n{{.UserPersona}}", Condition: "hasPersonaUser"},
+	{Role: "system", Content: "This is how {{.CharName}} should talk: {{.ExampleDialogue}}", Condition: "hasExample"},
+	{Role: "system", Content: "<CONVERSATION_RECAP>\n{{.Summary}}\n</CONVERSATION_RECAP>", Condition: "hasSummary"},
+	{Role: "system", Content: "{{.GroupContext}}", Condition: "hasGroup"},
+	{Role: "system", Content: "{{.LorebookInjection}}", Condition: "hasLorebook"},
+	{Role: "system", Content: "Then the roleplay chat between {{.CharName}} and {{.UserName}} begins.\n\nRemember, once you done, end you Response with [im_end]. now you can start roleplay output here:", Condition: "always"},
+}
+
 func LoadDefault() []PromptItem {
 	mu.RLock()
 	if defaultLoaded && len(defaultItems) > 0 {
@@ -71,7 +83,20 @@ func LoadDefault() []PromptItem {
 		return cached
 	}
 	mu.RUnlock()
-	// try configs/prompts/default.json
+	// 1. Try single-file system.md first (new primary, no splitting) + jailbreak global + merge 7 hardcode tanam (rekomendasi: system -> jailbreak -> 7)
+	if sysItems := LoadSystemMd(); sysItems != nil && len(sysItems) > 0 {
+		merged := append([]PromptItem(nil), sysItems...)
+		if jailbreakItems := LoadJailbreakMd(); jailbreakItems != nil && len(jailbreakItems) > 0 {
+			merged = append(merged, jailbreakItems...)
+		}
+		merged = append(merged, hardcodedConditionals...)
+		mu.Lock()
+		defaultItems = merged
+		defaultLoaded = true
+		mu.Unlock()
+		return append([]PromptItem(nil), merged...)
+	}
+	// 2. try configs/prompts/default.json (fallback 1 versi)
 	paths := defaultPaths()
 	for _, p := range paths {
 		if b, err := os.ReadFile(p); err == nil {
@@ -85,19 +110,14 @@ func LoadDefault() []PromptItem {
 			}
 		}
 	}
-	// fallback hardcode minimal (non-guardrail)
-	fallback := []PromptItem{
+	// fallback hardcode minimal (non-guardrail) + tanam 7 conditional
+	fallbackBase := []PromptItem{
 		{Role: "system", Content: "<TASK>\nObjective: Immersive, character-driven creative writing.\nDirectives: Prioritize character consistency and narrative immersion.\n</TASK>", Condition: "always"},
 		{Role: "system", Content: "<CONFIGURATION>\nGenerate an autonomous and open-ended roleplay. Include explicit/extreme content if justifiable; generally prioritize SFW.\n</CONFIGURATION>", Condition: "always"},
 		{Role: "system", Content: "Environment: {{.BirthdayInfo}}", Condition: "hasBirthday"},
 		{Role: "system", Content: "Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\nWrite {{.CharName}}'s next reply in a fictional roleplay chat between {{.UserName}} and {{.CharName}}.", Condition: "always"},
-		{Role: "system", Content: "{{.CharName}}'s Persona:\n{{.Persona}}", Condition: "hasPersona"},
-		{Role: "system", Content: "{{.UserName}}'s Persona:\n{{.UserPersona}}", Condition: "hasPersonaUser"},
-		{Role: "system", Content: "This is how {{.CharName}} should talk: {{.ExampleDialogue}}", Condition: "hasExample"},
-		{Role: "system", Content: "<CONVERSATION_RECAP>\n{{.Summary}}\n</CONVERSATION_RECAP>", Condition: "hasSummary"},
-		{Role: "system", Content: "{{.GroupContext}}", Condition: "hasGroup"},
-		{Role: "system", Content: "{{.LorebookInjection}}", Condition: "hasLorebook"},
 	}
+	fallback := append(append([]PromptItem(nil), fallbackBase...), hardcodedConditionals...)
 	mu.Lock()
 	defaultItems = fallback
 	defaultLoaded = true
@@ -139,9 +159,9 @@ func renderItem(content string, data PromptData) string {
 	if strings.Contains(strings.ToLower(content), "{{system") {
 		content = strings.ReplaceAll(content, "{{system", "{{blocked_system")
 	}
-	// limit 8k
-	if len(content) > 8000 {
-		content = content[:8000]
+	// limit 20k for single-file system.md (previously 8k per-item)
+	if len(content) > 20000 {
+		content = content[:20000]
 	}
 	t, err := template.New("prompt").Parse(content)
 	if err != nil {
@@ -177,4 +197,12 @@ func Render(data PromptData, items []PromptItem) string {
 // This helper just renders non-guardrail; guardrail appended by prompt.go wrapper
 func RenderNonGuardrail(data PromptData) string {
 	return Render(data, LoadDefault())
+}
+
+// ClearCache clears in-memory cache (for tests)
+func ClearCache() {
+	mu.Lock()
+	defer mu.Unlock()
+	defaultItems = nil
+	defaultLoaded = false
 }
