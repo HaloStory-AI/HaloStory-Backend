@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    image: ghcr.io/rafiq8k-moga/halostory-backend:${TAG:-latest}
     pull_policy: always
     container_name: halostory-app
     restart: unless-stopped
@@ -44,7 +44,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    image: ghcr.io/rafiq8k-moga/halostory-backend:${TAG:-latest}
     pull_policy: always
     container_name: halostory-worker
     restart: unless-stopped
@@ -78,7 +78,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    image: ghcr.io/rafiq8k-moga/halostory-backend:${TAG:-latest}
     pull_policy: always
     container_name: halostory-scheduler
     restart: unless-stopped
