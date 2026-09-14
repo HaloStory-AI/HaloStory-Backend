@@ -275,7 +275,7 @@ var TrustedBaseURLs = []string{
 	"api.cohere.ai",
 	"api.cerebras.ai",
 	"integrate.api.nvidia.com",
-	"api.ollama.com",
+	"ollama.com",
 }
 
 func IsTrustedBaseURL(rawURL string) bool {

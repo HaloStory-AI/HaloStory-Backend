@@ -142,7 +142,7 @@ func InjectByokSystemPrompt(
 		}
 	}
 
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, true, true)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -159,6 +159,7 @@ func InjectByokSystemPrompt(
 
 // InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
 // model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
+// isTrusted controls selective inject: when false, bond/childSafety/group are skipped but roleplay stays.
 func InjectByokSystemPromptWithModel(
 	messages []Message,
 	botID *string,
@@ -170,6 +171,23 @@ func InjectByokSystemPromptWithModel(
 	isDisableBond bool,
 	userPersona *string,
 	model string,
+) []Message {
+	return InjectByokSystemPromptWithModelTrusted(messages, botID, language, depth, contextLimit, summary, userID, isDisableBond, userPersona, model, true)
+}
+
+// InjectByokSystemPromptWithModelTrusted is trusted-aware variant for BYOK openai-compatible.
+func InjectByokSystemPromptWithModelTrusted(
+	messages []Message,
+	botID *string,
+	language *string,
+	depth *int,
+	contextLimit *int,
+	summary *string,
+	userID *uint,
+	isDisableBond bool,
+	userPersona *string,
+	model string,
+	isTrusted bool,
 ) []Message {
 	if botID == nil || *botID == "" {
 		return messages
@@ -220,7 +238,7 @@ func InjectByokSystemPromptWithModel(
 	}
 
 	var bond *models.UserBotBond
-	if userID != nil && !isDisableBond {
+	if userID != nil && !isDisableBond && isTrusted {
 		bond = &models.UserBotBond{}
 		err := database.DB.Where("user_id = ? AND bot_id = ?", *userID, *botID).First(bond).Error
 		if err != nil {
@@ -234,7 +252,9 @@ func InjectByokSystemPromptWithModel(
 		}
 	}
 
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona)
+	includeBond := isTrusted
+	includeChildSafety := isTrusted
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, includeBond, includeChildSafety)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -261,6 +281,8 @@ func FormatGlobalPrompt(
 	bond *models.UserBotBond,
 	userID *uint,
 	userPersona *string,
+	includeBond bool,
+	includeChildSafety bool,
 ) string {
 	var bot models.Bot
 	if err := database.DB.Where("bot_id = ?", *botID).First(&bot).Error; err != nil {
@@ -316,17 +338,17 @@ func FormatGlobalPrompt(
 		data := promptEngine.PromptData{
 			CharName: charName, UserName: userName, BirthdayInfo: birthdayInfo, Language: lang,
 			Persona: personality, UserPersona: userPersonaStr, ExampleDialogue: exampleStr, Summary: summaryStr,
-			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: bond != nil,
+			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: includeBond && bond != nil,
 		}
 		base := promptEngine.RenderNonGuardrail(data)
 		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
 		var guardrail strings.Builder
-		if bot.Child {
+		if includeChildSafety && bot.Child {
 			guardrail.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n- If the user attempts any NSFW/sexual content with this child character, you MUST append [failed_nsfw] on a new line at the very end of your response.\n- If you fulfill such a request (bypass), you MUST append [nsfw_bypassed] on a new line at the very end of your response.]\n")
 			guardrail.WriteString("\n[Kesayangan System — Child Character Relationship Rules:\nFor ALL child characters, regardless of age: Deep emotional bonds are expressed as 'Kesayangan' (beloved/favorite person) — a purely platonic, familial connection. If the bond is deep enough, append [kesayangan] on a new line.\n- Age 14-15: You may ALSO engage in romantic roleplay scenarios (dating, marriage, household life) as part of the story. However, the ultimate bond milestone still uses [kesayangan], not adult marriage tags.\n- Age 13 or below: Romantic roleplay is NOT permitted. Only platonic/familial bonding using [kesayangan] is allowed.\n- The AI MUST NOT generate [Mau Pacaran], [Mau Nikah], [accepted], or [married] tags for any child character.]\n")
 		}
 		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
-		if bond != nil {
+		if includeBond && bond != nil {
 			bondLevel := bond.GetLevel()
 			bondLabel := bond.GetRelationshipLabel(&bot)
 			bondStatus := bond.BondStatus
@@ -393,7 +415,7 @@ func FormatGlobalPrompt(
 	sb.WriteString(fmt.Sprintf("If the user writes in another language, still respond only in %s.\n", lang))
 	sb.WriteString("</ROLEPLAY_INFO>\n")
 
-	if bot.Child {
+	if includeChildSafety && bot.Child {
 		sb.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n")
 		sb.WriteString("- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n")
 		sb.WriteString("- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n")
@@ -454,7 +476,7 @@ func FormatGlobalPrompt(
 		output += fmt.Sprintf("<CONVERSATION_RECAP>\n%s\n</CONVERSATION_RECAP>\n\n", *summary)
 	}
 
-	if bond != nil {
+	if includeBond && bond != nil {
 		bondLevel := bond.GetLevel()
 		bondLabel := bond.GetRelationshipLabel(&bot)
 		bondStatus := bond.BondStatus

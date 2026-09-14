@@ -314,7 +314,7 @@ func GetSystemPrompt(c *gin.Context) {
 
 	lang := "id"
 	langPtr := &lang
-	prompt := byokSvc.FormatGlobalPrompt(&botID, langPtr, nil, nil, nil, nil)
+	prompt := byokSvc.FormatGlobalPrompt(&botID, langPtr, nil, nil, nil, nil, true, true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":       "success",

@@ -1111,27 +1111,25 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		matchedOA := memory.Scan(textsOA, lorebooksOA)
 		loreInjectionOA = memory.BuildLorebookInjection(matchedOA)
 	}
-	shouldInject := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
-	if !shouldInject {
+	isTrusted := data.Provider != "openai-compatible" || byok.IsTrustedBaseURL(baseURL)
+	if !isTrusted {
 		var usr models.User
 		if err := database.DB.First(&usr, userID).Error; err == nil && usr.Role == "admin" {
-			shouldInject = true
+			isTrusted = true
 		}
 	}
 
-	if shouldInject {
-		messages = byok.InjectByokSystemPromptWithModel(
-			messages, &botID, &lang, &historyDepth, contextLimit,
-			summary, &userID, data.IsDisableBond, userPersona,
-			model,
-		)
+	messages = byok.InjectByokSystemPromptWithModelTrusted(
+		messages, &botID, &lang, &historyDepth, contextLimit,
+		summary, &userID, data.IsDisableBond, userPersona,
+		model, isTrusted,
+	)
 
-		if data.IsGroup && len(data.BotIDs) > 1 {
-			primaryBotID := botID
-			messages = byok.InjectGroupContext(
-				messages, data.BotIDs, &primaryBotID, lang, &userID,
-			)
-		}
+	if isTrusted && data.IsGroup && len(data.BotIDs) > 1 {
+		primaryBotID := botID
+		messages = byok.InjectGroupContext(
+			messages, data.BotIDs, &primaryBotID, lang, &userID,
+		)
 	}
 	if loreInjectionOA != "" {
 		for i, m := range messages {
@@ -1273,7 +1271,7 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		var user models.User
 		database.DB.First(&user, uint(data.UserID))
 
-		if bot.BotID != "" && user.ID != 0 {
+		if isTrusted && bot.BotID != "" && user.ID != 0 {
 			messagesRaw, _ := base64.StdEncoding.DecodeString(data.Messages)
 			var originalMessages []byok.Message
 			_ = json.Unmarshal(messagesRaw, &originalMessages)
@@ -1294,7 +1292,7 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 		var respMap map[string]interface{}
 		json.Unmarshal(respBytes, &respMap)
 
-		if !data.IsGroup && !data.IsDisableBond && data.BotID != "" {
+		if isTrusted && !data.IsGroup && !data.IsDisableBond && data.BotID != "" {
 			bondResult := byok.AddBondXp(data.BotID, parsed, uint(data.UserID))
 			respMap["bond_event"] = bondResult.BondEvent
 			respMap["bond_status"] = bondResult.BondStatus

@@ -1,9 +1,9 @@
 package llm
 
 import (
-	"net/url"
 	"regexp"
-	"strings"
+
+	"halostory_go_backend/internal/services/byok"
 )
 
 type Capability struct {
@@ -107,20 +107,5 @@ func (r *Registry) Validate(provider, model string, baseURL *string) error {
 }
 
 func IsTrustedBaseURL(rawURL string) bool {
-	parsed, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil || parsed.Host == "" {
-		return false
-	}
-	host := strings.ToLower(parsed.Host)
-	trusted := []string{
-		"api.openai.com", "api.deepseek.com", "api.mistral.ai", "openrouter.ai",
-		"api.z.ai", "api.anthropic.com", "api.groq.com", "api.cohere.ai",
-		"api.cerebras.ai", "integrate.api.nvidia.com", "api.huashang.ai",
-	}
-	for _, t := range trusted {
-		if host == t || strings.HasSuffix(host, "."+t) {
-			return true
-		}
-	}
-	return false
+	return byok.IsTrustedBaseURL(rawURL)
 }
