@@ -1,4 +1,4 @@
-.PHONY: dev dev-win dev-win-worker build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs docker-worker-up docker-worker-down docker-worker-logs docker-worker-build
+.PHONY: dev dev-win dev-win-worker build build-server build-worker build-scheduler build-all test clean docker-build docker-up docker-down docker-logs docker-pull docker-up-prod docker-worker-up docker-worker-down docker-worker-logs docker-worker-build
 
 dev:
 	air
@@ -46,6 +46,13 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f
+
+# Prod: pull dari GHCR tanpa build, tanpa down
+docker-pull:
+	docker compose pull
+
+docker-up-prod:
+	docker compose pull && docker compose up -d --remove-orphans
 
 docker-worker-build:
 	docker compose -f docker-compose.worker.yml build

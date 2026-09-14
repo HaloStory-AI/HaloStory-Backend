@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: halostory-backend:latest
-    pull_policy: never
+    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    pull_policy: always
     container_name: halostory-app
     restart: unless-stopped
     env_file:
@@ -29,6 +29,13 @@ services:
       - ./.env:/app/.env
     ports:
       - "${APP_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     networks:
       - default
       - dokploy-network
@@ -37,8 +44,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: halostory-backend:latest
-    pull_policy: never
+    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    pull_policy: always
     container_name: halostory-worker
     restart: unless-stopped
     env_file:
@@ -62,6 +69,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    stop_grace_period: 30s
     networks:
       - default
       - dokploy-network
@@ -70,8 +78,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: halostory-backend:latest
-    pull_policy: never
+    image: ghcr.io/rafiq8k/halostory-backend:${TAG:-latest}
+    pull_policy: always
     container_name: halostory-scheduler
     restart: unless-stopped
     env_file:
@@ -89,6 +97,7 @@ services:
     depends_on:
       redis:
         condition: service_started
+    stop_grace_period: 30s
     networks:
       - default
       - dokploy-network
