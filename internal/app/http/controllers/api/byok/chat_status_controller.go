@@ -12,7 +12,7 @@ import (
 func ChatStatus(c *gin.Context) {
 	uuid := c.Param("uuid")
 
-	data, err := services.GetChatResult(uuid)
+	data, err := services.GetChatResultResilient(uuid)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"status":  "not_found",

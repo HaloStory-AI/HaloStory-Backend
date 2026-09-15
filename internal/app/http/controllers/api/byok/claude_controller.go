@@ -3,6 +3,7 @@ package byok
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -189,15 +190,19 @@ func ClaudeChat(c *gin.Context) {
 
 	payloadJSON, _ := json.Marshal(payload)
 
-	if err := services.StoreChatResult(uid, payloadJSON, 10*time.Minute); err != nil {
+	if viaDB, err := services.StoreChatRequest(uid, payloadJSON, 10*time.Minute); err != nil {
+		log.Printf("Chat %s: store gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Redis error",
+			"error":   "Store error",
 			"message": "Failed to store chat request",
 		})
 		return
+	} else if viaDB {
+		c.Header("X-Degraded", "db-fallback")
 	}
 
-	if err := services.Enqueue("ai-chat", payloadJSON); err != nil {
+	if err := services.EnqueueResilient("ai-chat", uid, payloadJSON); err != nil {
+		log.Printf("Chat %s: enqueue gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Queue error",
 			"message": "Failed to enqueue chat job",

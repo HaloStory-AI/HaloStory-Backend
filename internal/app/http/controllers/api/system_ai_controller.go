@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"halostory_go_backend/internal/app/models"
@@ -153,21 +154,34 @@ func SystemChat(c *gin.Context) {
 
 	payloadJSON, _ := json.Marshal(payload)
 
-	if err := services.StoreChatResult(uid, payloadJSON, systemai.ChatResultTTL); err != nil {
+	if viaDB, err := services.StoreChatRequest(uid, payloadJSON, systemai.ChatResultTTL); err != nil {
+		log.Printf("Chat %s: store gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Redis error",
+			"error":   "Store error",
 			"message": "Failed to store chat request",
 		})
 		return
+	} else if viaDB {
+		c.Header("X-Degraded", "db-fallback")
 	}
 
 	// Cooldown check: if in cooldown, push to pending queue instead
 	cooldownActive, err := services.CheckCooldown(user.ID)
 	if err == nil && cooldownActive {
 		if err := services.PushPending(user.ID, uid); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Redis error",
-				"message": "Failed to queue chat request",
+			log.Printf("Chat %s: push-pending gagal: %v — antre langsung", uid, err)
+			if err2 := services.EnqueueResilient("ai-chat", uid, payloadJSON); err2 != nil {
+				log.Printf("Chat %s: enqueue gagal (redis+db): %v", uid, err2)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "Queue error",
+					"message": "Failed to queue chat request",
+				})
+				return
+			}
+			c.Header("X-Degraded", "db-fallback")
+			c.JSON(http.StatusOK, gin.H{
+				"status": "queued",
+				"uuid":   uid,
 			})
 			return
 		}
@@ -178,7 +192,8 @@ func SystemChat(c *gin.Context) {
 		return
 	}
 
-	if err := services.Enqueue("ai-chat", payloadJSON); err != nil {
+	if err := services.EnqueueResilient("ai-chat", uid, payloadJSON); err != nil {
+		log.Printf("Chat %s: enqueue gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Queue error",
 			"message": "Failed to enqueue chat job",
@@ -260,20 +275,33 @@ func Summarize(c *gin.Context) {
 
 	payloadJSON, _ := json.Marshal(payload)
 
-	if err := services.StoreChatResult(uid, payloadJSON, systemai.ChatResultTTL); err != nil {
+	if viaDB, err := services.StoreChatRequest(uid, payloadJSON, systemai.ChatResultTTL); err != nil {
+		log.Printf("Chat %s: store gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Redis error",
+			"error":   "Store error",
 			"message": "Failed to store chat request",
 		})
 		return
+	} else if viaDB {
+		c.Header("X-Degraded", "db-fallback")
 	}
 
 	cooldownActive, err := services.CheckCooldown(user.ID)
 	if err == nil && cooldownActive {
 		if err := services.PushPending(user.ID, uid); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Redis error",
-				"message": "Failed to queue chat request",
+			log.Printf("Chat %s: push-pending gagal: %v — antre langsung", uid, err)
+			if err2 := services.EnqueueResilient("ai-chat", uid, payloadJSON); err2 != nil {
+				log.Printf("Chat %s: enqueue gagal (redis+db): %v", uid, err2)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error":   "Queue error",
+					"message": "Failed to queue chat request",
+				})
+				return
+			}
+			c.Header("X-Degraded", "db-fallback")
+			c.JSON(http.StatusOK, gin.H{
+				"status": "queued",
+				"uuid":   uid,
 			})
 			return
 		}
@@ -284,7 +312,8 @@ func Summarize(c *gin.Context) {
 		return
 	}
 
-	if err := services.Enqueue("ai-chat", payloadJSON); err != nil {
+	if err := services.EnqueueResilient("ai-chat", uid, payloadJSON); err != nil {
+		log.Printf("Chat %s: enqueue gagal (redis+db): %v", uid, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Queue error",
 			"message": "Failed to enqueue chat job",

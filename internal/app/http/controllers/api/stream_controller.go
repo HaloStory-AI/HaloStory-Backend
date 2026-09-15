@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"halostory_go_backend/internal/services"
 
@@ -23,14 +24,36 @@ func ChatStream(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 	c.Writer.Header().Set("X-Trace-Id", uuid)
 
-	// If already completed, return immediately
-	if data, err := services.GetChatResult(uuid); err == nil {
+	// If already completed, return immediately (Redis → DB fallback)
+	if data, err := services.GetChatResultResilient(uuid); err == nil {
 		var m map[string]interface{}
 		if json.Unmarshal(data, &m) == nil {
 			if m["status"] == "completed" {
 				// Return done event
 				c.SSEvent("done", string(data))
 				return
+			}
+		}
+	}
+
+	// Redis down → degradasi ke polling 1 detik (tanpa delta real-time).
+	// Hasil akhir tetap terkirim sebagai event "done".
+	if !services.IsRedisUp() {
+		c.Header("X-Degraded", "polling")
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-c.Request.Context().Done():
+				return
+			case <-ticker.C:
+				if data, err := services.GetChatResultResilient(uuid); err == nil {
+					var m map[string]interface{}
+					if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
+						c.SSEvent("done", string(data))
+						return
+					}
+				}
 			}
 		}
 	}
@@ -42,7 +65,7 @@ func ChatStream(c *gin.Context) {
 	}
 
 	// Check if already completed after replay
-	if data, err := services.GetChatResult(uuid); err == nil {
+	if data, err := services.GetChatResultResilient(uuid); err == nil {
 		var m map[string]interface{}
 		if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
 			c.SSEvent("done", string(data))
@@ -51,17 +74,28 @@ func ChatStream(c *gin.Context) {
 	}
 
 	ch := services.SubscribeStream(c.Request.Context(), uuid)
+	watchdog := time.NewTicker(5 * time.Second)
+	defer watchdog.Stop()
 	for {
 		select {
 		case <-c.Request.Context().Done():
 			return
+		case <-watchdog.C:
+			// Redis mati di tengah stream → cek hasil via fallback
+			if data, err := services.GetChatResultResilient(uuid); err == nil {
+				var m map[string]interface{}
+				if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
+					c.SSEvent("done", string(data))
+					return
+				}
+			}
 		case delta, ok := <-ch:
 			if !ok {
 				return
 			}
 			if delta == "[DONE]" {
 				// fetch final result
-				if data, err := services.GetChatResult(uuid); err == nil {
+				if data, err := services.GetChatResultResilient(uuid); err == nil {
 					c.SSEvent("done", string(data))
 				} else {
 					c.SSEvent("done", gin.H{"uuid": uuid})

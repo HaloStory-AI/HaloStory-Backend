@@ -25,6 +25,7 @@ func StartScheduler() *cron.Cron {
 
 	c.AddFunc("@every 1m", unbanExpired)
 	c.AddFunc("@every 1m", cleanExpiredStories)
+	c.AddFunc("@every 10m", CleanExpiredChatJobs)
 	c.AddFunc("@every 1h", makeStories)
 	c.AddFunc("0 0 * * *", sendHourlyAnalytics)
 	c.AddFunc("0 0 * * 0", sendDailyAnalytics)
@@ -33,7 +34,7 @@ func StartScheduler() *cron.Cron {
 	c.AddFunc("0 0 0 * * 0", cleanupAnalytics)
 
 	c.Start()
-	log.Println("Scheduler: Started with tasks: unban-expired, clean-stories, make-stories, analytics")
+	log.Println("Scheduler: Started with tasks: unban-expired, clean-stories, clean-chat-jobs, make-stories, analytics")
 	return c
 }
 

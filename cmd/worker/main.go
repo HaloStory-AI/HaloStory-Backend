@@ -73,6 +73,15 @@ type reasoningConfig struct {
 
 var httpClient = utils.NewAIHttpClient()
 
+// workerID unik per proses untuk klaim job DB (aman multi-worker/VPS).
+func workerID() string {
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "worker"
+	}
+	return fmt.Sprintf("%s-%d", host, os.Getpid())
+}
+
 func isSystemAIJob(data []byte) bool {
 	var p struct {
 		Provider string `json:"provider"`
@@ -153,10 +162,25 @@ func main() {
 	}()
 
 	go func() {
+		wid := workerID()
 		backoff := 100 * time.Millisecond
+		lastDbSweep := time.Now().Add(-1 * time.Hour) // sweep pertama langsung jalan
 		for {
 			_, data, err := services.Dequeue("ai-chat", 5*time.Second)
 			if err != nil {
+				// Redis down → klaim job dari DB; Redis sehat → sweep berkala
+				// untuk menguras sisa job DB pasca-flap.
+				shouldSweep := services.IsRedisDown(err) || time.Since(lastDbSweep) > 30*time.Second
+				if shouldSweep {
+					lastDbSweep = time.Now()
+					if payload, cerr := services.ClaimDbJob(wid); cerr != nil {
+						log.Printf("Worker: ClaimDbJob error: %v", cerr)
+					} else if payload != nil {
+						backoff = 100 * time.Millisecond
+						dispatchJob(payload, mainSem, "main-db")
+						continue
+					}
+				}
 				time.Sleep(backoff)
 				backoff *= 2
 				if backoff > 10*time.Second {
@@ -220,7 +244,7 @@ func processJob(rawData []byte) {
 
 	data.Status = "processing"
 	updateJSON, _ := json.Marshal(data)
-	services.StoreChatResult(uuid, updateJSON, 10*time.Minute)
+	services.StoreProcessingResilient(uuid, updateJSON)
 
 	if data.UserID > 0 {
 		userID := uint(data.UserID)
@@ -585,7 +609,7 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 
 func markCompleted(uuid, storeKey string, response interface{}, statusCode int) {
 	respJSON, _ := json.Marshal(response)
-	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
+	services.MarkChatCompletedResilient(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Completed job %s with status %d", uuid, statusCode)
 }
 
@@ -870,7 +894,7 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 		"status_code": statusCode,
 	}
 	// Preserve trace_id from original payload if exists
-	if existing, err := services.GetChatResult(uuid); err == nil {
+	if existing, err := services.GetChatResultResilient(uuid); err == nil {
 		var existingMap map[string]interface{}
 		if json.Unmarshal(existing, &existingMap) == nil {
 			if tid, ok := existingMap["trace_id"].(string); ok && tid != "" {
@@ -879,7 +903,14 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 		}
 	}
 	jsonBytes, _ := json.Marshal(payload)
-	services.StoreChatResult(uuid, jsonBytes, 10*time.Minute)
+	if err := services.StoreChatResult(uuid, jsonBytes, 10*time.Minute); err != nil {
+		// Redis down → simpan inner response ke DB (payload envelope dipecah
+		// agar GetChatResultFallback membangun envelope yang benar).
+		inner, _ := json.Marshal(response)
+		if derr := services.MarkChatCompletedFallback(uuid, json.RawMessage(inner), statusCode); derr != nil {
+			log.Printf("Worker: System AI fallback store gagal untuk %s: %v", uuid, derr)
+		}
+	}
 	log.Printf("Worker: Completed system AI job %s with status %d", uuid, statusCode)
 
 	// Drain pending queue
@@ -888,7 +919,7 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 		return
 	}
 
-	nextData, err := services.GetChatResult(nextUUID)
+	nextData, err := services.GetChatResultResilient(nextUUID)
 	if err != nil {
 		log.Printf("Worker: Pending data for %s not found, skipping", nextUUID)
 		return
@@ -902,7 +933,7 @@ func markSystemAICompleted(uuid, storeKey string, response map[string]interface{
 
 	nextPayload["uuid"] = nextUUID
 	enqBytes, _ := json.Marshal(nextPayload)
-	services.Enqueue("ai-chat", enqBytes)
+	_ = services.EnqueueResilient("ai-chat", nextUUID, enqBytes)
 	services.SetCooldown(userID, systemai.CooldownDuration)
 	log.Printf("Worker: Dispatched pending job %s from queue", nextUUID)
 }
@@ -1004,7 +1035,7 @@ func markSummaryCompleted(uuid, storeKey, summary string, memories []string, sta
 		response["error_status_code"] = statusCode
 	}
 	respJSON, _ := json.Marshal(response)
-	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
+	services.MarkChatCompletedResilient(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Completed summarization job %s with status %d", uuid, statusCode)
 }
 
@@ -1687,7 +1718,7 @@ func providerDefaultBaseURL(provider string) string {
 func processMockChat(uuid, storeKey string, data chatData) {
 	data.Status = "processing"
 	updateJSON, _ := json.Marshal(data)
-	services.StoreChatResult(uuid, updateJSON, 10*time.Minute)
+	services.StoreProcessingResilient(uuid, updateJSON)
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -1710,7 +1741,7 @@ func processMockChat(uuid, storeKey string, data chatData) {
 	}
 
 	respJSON, _ := json.Marshal(response)
-	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), 200)
+	services.MarkChatCompletedResilient(uuid, json.RawMessage(respJSON), 200)
 	log.Printf("Worker: Completed mock job %s", uuid)
 }
 
@@ -1719,6 +1750,6 @@ func markError(uuid, storeKey, message string, statusCode int) {
 		"error":             message,
 		"error_status_code": statusCode,
 	})
-	services.MarkChatCompleted(uuid, json.RawMessage(respJSON), statusCode)
+	services.MarkChatCompletedResilient(uuid, json.RawMessage(respJSON), statusCode)
 	log.Printf("Worker: Error job %s: %s (status %d)", uuid, message, statusCode)
 }
