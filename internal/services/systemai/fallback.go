@@ -11,27 +11,29 @@ import (
 	"halostory_go_backend/internal/utils"
 )
 
-func buildChain(isVip bool) []ChainEntry {
-	model := FreeUserModel
+func buildChain(isVip bool) ([]ChainEntry, error) {
+	model, msg := RequireNvidiaModel(isVip)
+	if msg != "" {
+		return nil, fmt.Errorf("%s", msg)
+	}
 	temp := 0.8
 	topP := 0.95
 	if isVip {
-		model = VipUserModel
 		topP = 0.8
 	}
 	return []ChainEntry{{
-		Provider: "router",
+		Provider: "nvidia",
 		Model:    model,
 		Config: ProviderConfig{
-			Label:   "router",
-			BaseURL: config.Env("ROUTER_SYSTEM_URL", RouterBaseURL),
+			Label:   "nvidia",
+			BaseURL: config.Env("NVIDIA_SYSTEM_URL", NvidiaBaseURL),
 		},
 		Temperature:      temp,
 		TopP:             topP,
 		MaxTokens:        32000,
 		PresencePenalty:  0.5,
 		FrequencyPenalty: 0.2,
-	}}
+	}}, nil
 }
 
 func buildOpenAIRequest(messages []byok.Message, entry ChainEntry) byok.OpenAICompatRequest {
@@ -122,24 +124,42 @@ func extractContent(m map[string]interface{}) string {
 }
 
 func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
-	chain := buildChain(isVip)
-	entry := chain[0]
-
-	pings := make([]PingLog, 0)
-
-	apiKey := config.Env("ROUTER_SYSTEM_KEY", "")
-	if apiKey == "" {
+	keys := GetNvidiaKeys()
+	if len(keys) == 0 {
+		model, _ := RequireNvidiaModel(isVip)
+		provModel := model
+		if provModel == "" {
+			provModel = "nvidia"
+		}
 		return &ChainResult{
 			StatusCode: 503,
-			Error:      "router API key not configured",
+			Error:      "nvidia keys not configured (NVIDIA_SYSTEM_KEYS)",
 			Pings: []PingLog{{
-				Provider: entry.Provider,
-				Model:    entry.Model,
+				Provider: "nvidia",
+				Model:    provModel,
 				Status:   "error",
 				Detail:   "no API key configured",
 			}},
 		}
 	}
+	chain, err := buildChain(isVip)
+	if err != nil {
+		return &ChainResult{
+			StatusCode: 503,
+			Error:      err.Error(),
+			Pings: []PingLog{{
+				Provider: "nvidia",
+				Model:    "nvidia",
+				Status:   "error",
+				Detail:   err.Error(),
+			}},
+		}
+	}
+	entry := chain[0]
+
+	pings := make([]PingLog, 0)
+
+	apiKey := PickRandomKey(keys)
 
 	reqPayload := buildOpenAIRequest(messages, entry)
 	openaiResp, code, err := byok.CallOpenAI(httpClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
@@ -152,7 +172,7 @@ func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *
 		})
 		return &ChainResult{
 			StatusCode: code,
-			Error:      fmt.Sprintf("router request failed: %v", err),
+			Error:      fmt.Sprintf("nvidia request failed: %v", err),
 			Pings:      pings,
 		}
 	}
@@ -167,7 +187,7 @@ func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *
 		})
 		return &ChainResult{
 			StatusCode: code,
-			Error:      "router returned empty response content",
+			Error:      "nvidia returned empty response content",
 			Pings:      pings,
 		}
 	}
@@ -186,29 +206,47 @@ func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *
 }
 
 // RunFallbackChainStream sama seperti RunFallbackChain tapi memakai SSE streaming
-// ke upstream (router OpenAI-compatible). Setiap delta mentah difilter via
+// ke upstream (nvidia OpenAI-compatible). Setiap delta mentah difilter via
 // StreamSanitizer sebelum diteruskan ke onDelta agar bond tags/<think> tidak
 // bocor ke frontend. Hasil akhir authoritatif tetap via ParseBondTags
 // post-completion di worker; onDone menerima sisa flush sanitizer.
 func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params *SystemAIChatParams, isVip bool, onDelta func(string) error) *ChainResult {
-	chain := buildChain(isVip)
-	entry := chain[0]
-
-	pings := make([]PingLog, 0)
-
-	apiKey := config.Env("ROUTER_SYSTEM_KEY", "")
-	if apiKey == "" {
+	keys := GetNvidiaKeys()
+	if len(keys) == 0 {
+		model, _ := RequireNvidiaModel(isVip)
+		provModel := model
+		if provModel == "" {
+			provModel = "nvidia"
+		}
 		return &ChainResult{
 			StatusCode: 503,
-			Error:      "router API key not configured",
+			Error:      "nvidia keys not configured (NVIDIA_SYSTEM_KEYS)",
 			Pings: []PingLog{{
-				Provider: entry.Provider,
-				Model:    entry.Model,
+				Provider: "nvidia",
+				Model:    provModel,
 				Status:   "error",
 				Detail:   "no API key configured",
 			}},
 		}
 	}
+	chain, errChain := buildChain(isVip)
+	if errChain != nil {
+		return &ChainResult{
+			StatusCode: 503,
+			Error:      errChain.Error(),
+			Pings: []PingLog{{
+				Provider: "nvidia",
+				Model:    "nvidia",
+				Status:   "error",
+				Detail:   errChain.Error(),
+			}},
+		}
+	}
+	entry := chain[0]
+
+	pings := make([]PingLog, 0)
+
+	apiKey := PickRandomKey(keys)
 
 	reqPayload := buildOpenAIRequest(messages, entry)
 	sanitizer := &byok.StreamSanitizer{}
@@ -231,7 +269,7 @@ func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params
 		})
 		return &ChainResult{
 			StatusCode: code,
-			Error:      fmt.Sprintf("router stream request failed: %v", err),
+			Error:      fmt.Sprintf("nvidia stream request failed: %v", err),
 			Pings:      pings,
 		}
 	}
@@ -251,7 +289,7 @@ func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params
 		})
 		return &ChainResult{
 			StatusCode: code,
-			Error:      "router returned empty response content",
+			Error:      "nvidia returned empty response content",
 			Pings:      pings,
 		}
 	}
