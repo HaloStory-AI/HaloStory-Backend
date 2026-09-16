@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -10,6 +11,36 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func sendDone(c *gin.Context, data string) {
+	c.SSEvent("done", data)
+	c.Writer.Flush()
+}
+
+// fetchCompletedResult membaca hasil completed dengan retry singkat.
+// Diperlukan karena worker mem-publish "[DONE]" sebelum write hasil akhir
+// (bond-parse + store) selesai — tanpa retry, klien dapat done {uuid} kosong.
+func fetchCompletedResult(uuid string) (string, bool) {
+	for i := 0; i < 3; i++ {
+		if data, err := services.GetChatResultResilient(uuid); err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
+				return string(data), true
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return "", false
+}
+
+// flushHeaders mengirim header SSE + comment awal agar TTFB < 1 detik.
+// Tanpa ini, proxy (nginx/Cloudflare) dan http client menunggu byte pertama
+// yang baru tiba saat delta/completed — koneksi terlihat "pending".
+func flushHeaders(c *gin.Context, uuid string) {
+	c.Status(http.StatusOK)
+	_, _ = fmt.Fprint(c.Writer, ": connected\n\n")
+	c.Writer.Flush()
+}
 
 func ChatStream(c *gin.Context) {
 	uuid := c.Param("uuid")
@@ -23,36 +54,35 @@ func ChatStream(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 	c.Writer.Header().Set("X-Trace-Id", uuid)
+	flushHeaders(c, uuid)
 
 	// If already completed, return immediately (Redis → DB fallback)
-	if data, err := services.GetChatResultResilient(uuid); err == nil {
-		var m map[string]interface{}
-		if json.Unmarshal(data, &m) == nil {
-			if m["status"] == "completed" {
-				// Return done event
-				c.SSEvent("done", string(data))
-				return
-			}
-		}
+	if data, ok := fetchCompletedResult(uuid); ok {
+		// Return done event
+		sendDone(c, data)
+		return
 	}
 
 	// Redis down → degradasi ke polling 1 detik (tanpa delta real-time).
 	// Hasil akhir tetap terkirim sebagai event "done".
+	// Keepalive 15 dtk agar nginx/Cloudflare tidak membunuh koneksi idle.
 	if !services.IsRedisUp() {
 		c.Header("X-Degraded", "polling")
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
+		keepalive := time.NewTicker(15 * time.Second)
+		defer keepalive.Stop()
 		for {
 			select {
 			case <-c.Request.Context().Done():
 				return
+			case <-keepalive.C:
+				_, _ = fmt.Fprint(c.Writer, ": ping\n\n")
+				c.Writer.Flush()
 			case <-ticker.C:
-				if data, err := services.GetChatResultResilient(uuid); err == nil {
-					var m map[string]interface{}
-					if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
-						c.SSEvent("done", string(data))
-						return
-					}
+				if data, ok := fetchCompletedResult(uuid); ok {
+					sendDone(c, data)
+					return
 				}
 			}
 		}
@@ -65,40 +95,40 @@ func ChatStream(c *gin.Context) {
 	}
 
 	// Check if already completed after replay
-	if data, err := services.GetChatResultResilient(uuid); err == nil {
-		var m map[string]interface{}
-		if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
-			c.SSEvent("done", string(data))
-			return
-		}
+	if data, ok := fetchCompletedResult(uuid); ok {
+		sendDone(c, data)
+		return
 	}
 
 	ch := services.SubscribeStream(c.Request.Context(), uuid)
 	watchdog := time.NewTicker(5 * time.Second)
 	defer watchdog.Stop()
+	keepalive := time.NewTicker(15 * time.Second)
+	defer keepalive.Stop()
 	for {
 		select {
 		case <-c.Request.Context().Done():
 			return
+		case <-keepalive.C:
+			_, _ = fmt.Fprint(c.Writer, ": ping\n\n")
+			c.Writer.Flush()
 		case <-watchdog.C:
 			// Redis mati di tengah stream → cek hasil via fallback
-			if data, err := services.GetChatResultResilient(uuid); err == nil {
-				var m map[string]interface{}
-				if json.Unmarshal(data, &m) == nil && m["status"] == "completed" {
-					c.SSEvent("done", string(data))
-					return
-				}
+			if data, ok := fetchCompletedResult(uuid); ok {
+				sendDone(c, data)
+				return
 			}
 		case delta, ok := <-ch:
 			if !ok {
 				return
 			}
 			if delta == "[DONE]" {
-				// fetch final result
-				if data, err := services.GetChatResultResilient(uuid); err == nil {
-					c.SSEvent("done", string(data))
+				// fetch final result (dengan retry: DONE dipublish sebelum write)
+				if data, ok := fetchCompletedResult(uuid); ok {
+					sendDone(c, data)
 				} else {
-					c.SSEvent("done", gin.H{"uuid": uuid})
+					fb, _ := json.Marshal(gin.H{"uuid": uuid})
+					sendDone(c, string(fb))
 				}
 				return
 			}
