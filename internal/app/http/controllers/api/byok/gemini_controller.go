@@ -179,5 +179,8 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 	if req.ContextLimit != nil {
 		payload["context_limit"] = *req.ContextLimit
 	}
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
+	}
 	return payload
 }

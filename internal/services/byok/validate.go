@@ -41,6 +41,7 @@ type BYOKRequest struct {
 	MinP             *float64         `json:"min_p,omitempty"`
 	RepetitionPenalty *float64        `json:"repetition_penalty,omitempty"`
 	ContextLimit     *int             `json:"context_limit,omitempty"`
+	Stream           *bool            `json:"stream,omitempty"`
 	SourceIP         string           `json:"-"`
 }
 

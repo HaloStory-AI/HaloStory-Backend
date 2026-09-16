@@ -62,6 +62,7 @@ type chatData struct {
 	ResponseLength   float64          `json:"response_length,omitempty"`
 	TraceID          string           `json:"trace_id,omitempty"`
 	ContextLimit     float64          `json:"context_limit,omitempty"`
+	IsStream         bool             `json:"is_stream,omitempty"`
 }
 
 type reasoningConfig struct {
@@ -525,7 +526,30 @@ func processGeminiChat(uuid, storeKey string, data chatData) {
 		req.SystemInstruction = systemInstruct
 	}
 
-	geminiResp, statusCode, err := byok.CallGemini(decryptedKey, data.Model, req)
+	geminiResp, statusCode, err := func() (*byok.GeminiResponse, int, error) {
+		if !data.IsStream || os.Getenv("USE_STREAMING") == "false" {
+			return byok.CallGemini(decryptedKey, data.Model, req)
+		}
+		streamClient := utils.NewAIHttpClientNoTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+		defer cancel()
+		sanitizer := &byok.StreamSanitizer{}
+		resp, code, cerr := byok.CallGeminiStream(ctx, streamClient, decryptedKey, data.Model, req, func(delta string) error {
+			if clean := sanitizer.Feed(delta); clean != "" {
+				_ = services.PublishStream(uuid, clean)
+			}
+			return nil
+		})
+		if cerr != nil {
+			// Fallback ke non-stream; tanpa delta (SSE jadi done saja).
+			return byok.CallGemini(decryptedKey, data.Model, req)
+		}
+		if rest := sanitizer.Flush(); rest != "" {
+			_ = services.PublishStream(uuid, rest)
+		}
+		_ = services.PublishStreamDone(uuid)
+		return resp, code, nil
+	}()
 	if err != nil {
 		log.Printf("Worker: Gemini API error for %s: %v (status %d)", uuid, err, statusCode)
 		markError(uuid, storeKey, "[GoogleAI] response failed: "+err.Error(), statusCode)
@@ -756,7 +780,25 @@ func processSystemAIChat(uuid, storeKey string, data chatData) {
 	}
 
 	start := time.Now()
-	result := systemai.RunFallbackChain(httpClient, messages, params, isVip)
+	var result *systemai.ChainResult
+	if data.IsStream && os.Getenv("USE_STREAMING") != "false" {
+		streamCtx, streamCancel := context.WithTimeout(context.Background(), 200*time.Second)
+		result = systemai.RunFallbackChainStream(streamCtx, messages, params, isVip, func(delta string) error {
+			_ = services.PublishStream(uuid, delta)
+			return nil
+		})
+		streamCancel()
+		if result.Error == "" {
+			_ = services.PublishStreamDone(uuid)
+		} else {
+			// SSE upstream gagal → fallback non-stream agar klien tetap dapat
+			// hasil akhir via done/watchdog (konsisten dengan gemini/claude/openai).
+			log.Printf("Worker: System AI stream gagal untuk %s: %s — fallback non-stream", uuid, result.Error)
+			result = systemai.RunFallbackChain(httpClient, messages, params, isVip)
+		}
+	} else {
+		result = systemai.RunFallbackChain(httpClient, messages, params, isVip)
+	}
 	log.Printf("Worker: System AI chain for %s took %v, success=%v", uuid, time.Since(start), result.Error == "")
 
 	if result.Error != "" {
@@ -1253,17 +1295,24 @@ func processOpenAIChat(uuid, storeKey string, data chatData) {
 
 	var openaiResp *byok.OpenAICompatResponse
 	var statusCode int
-	// Fase 3: try streaming if enabled (USE_STREAMING != false)
-	if os.Getenv("USE_STREAMING") != "false" {
+	// Streaming SSE hanya jika klien meminta (is_stream) dan tidak dimatikan
+	// global via USE_STREAMING=false. Absen/false = polling biasa (kompatibel lama).
+	if data.IsStream && os.Getenv("USE_STREAMING") != "false" {
 		streamClient := utils.NewAIHttpClientNoTimeout()
 		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
-		// publish streaming deltas
+		// publish streaming deltas (difilter agar bond tags/<think> tidak bocor)
+		sanitizer := &byok.StreamSanitizer{}
 		resp, code, cerr := byok.CallOpenAIStream(ctx, streamClient, decryptedKey, baseURL, model, reqPayload, openAIOpts, func(delta string) error {
-			_ = services.PublishStream(uuid, delta)
+			if clean := sanitizer.Feed(delta); clean != "" {
+				_ = services.PublishStream(uuid, clean)
+			}
 			return nil
 		})
 		cancel()
 		if cerr == nil && resp != nil {
+			if rest := sanitizer.Flush(); rest != "" {
+				_ = services.PublishStream(uuid, rest)
+			}
 			openaiResp = resp
 			statusCode = code
 			_ = services.PublishStreamDone(uuid)
@@ -1543,7 +1592,30 @@ func processClaudeChat(uuid, storeKey string, data chatData) {
 
 	claudeReq := byok.BuildClaudePayload(messages, data.Model, payloadMap)
 
-	claudeResp, statusCode, err := byok.CallClaude(decryptedKey, data.Model, claudeReq, 200*time.Second)
+	claudeResp, statusCode, err := func() (*byok.ClaudeResponse, int, error) {
+		if !data.IsStream || os.Getenv("USE_STREAMING") == "false" {
+			return byok.CallClaude(decryptedKey, data.Model, claudeReq, 200*time.Second)
+		}
+		streamClient := utils.NewAIHttpClientNoTimeout()
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Second)
+		defer cancel()
+		sanitizer := &byok.StreamSanitizer{}
+		resp, code, cerr := byok.CallClaudeStream(ctx, streamClient, decryptedKey, data.Model, claudeReq, func(delta string) error {
+			if clean := sanitizer.Feed(delta); clean != "" {
+				_ = services.PublishStream(uuid, clean)
+			}
+			return nil
+		})
+		if cerr != nil {
+			// Fallback ke non-stream; tanpa delta (SSE jadi done saja).
+			return byok.CallClaude(decryptedKey, data.Model, claudeReq, 200*time.Second)
+		}
+		if rest := sanitizer.Flush(); rest != "" {
+			_ = services.PublishStream(uuid, rest)
+		}
+		_ = services.PublishStreamDone(uuid)
+		return resp, code, nil
+	}()
 	if err != nil {
 		log.Printf("Worker: Claude API error for %s: %v (status %d)", uuid, err, statusCode)
 		markError(uuid, storeKey, "Claude API error: "+err.Error(), statusCode)

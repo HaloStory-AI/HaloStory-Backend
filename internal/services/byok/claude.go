@@ -1,11 +1,14 @@
 package byok
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -20,14 +23,14 @@ type ClaudeThinkingConfig struct {
 }
 
 type ClaudeRequest struct {
-	Model         string               `json:"model"`
-	Messages      []ClaudeMessage      `json:"messages"`
-	MaxTokens     int                  `json:"max_tokens"`
-	Temperature   *float64             `json:"temperature,omitempty"`
-	TopP          *float64             `json:"top_p,omitempty"`
-	TopK          *int                 `json:"top_k,omitempty"`
-	StopSequences []string             `json:"stop_sequences,omitempty"`
-	System        string               `json:"system,omitempty"`
+	Model         string                `json:"model"`
+	Messages      []ClaudeMessage       `json:"messages"`
+	MaxTokens     int                   `json:"max_tokens"`
+	Temperature   *float64              `json:"temperature,omitempty"`
+	TopP          *float64              `json:"top_p,omitempty"`
+	TopK          *int                  `json:"top_k,omitempty"`
+	StopSequences []string              `json:"stop_sequences,omitempty"`
+	System        string                `json:"system,omitempty"`
 	Thinking      *ClaudeThinkingConfig `json:"thinking,omitempty"`
 }
 
@@ -103,6 +106,125 @@ func CallClaude(apiKey, model string, payload ClaudeRequest, timeout time.Durati
 	}
 
 	return &claudeResp, resp.StatusCode, nil
+}
+
+// CallClaudeStream memakai SSE Anthropic (Accept: text/event-stream).
+// Event content_block_delta (text_delta) diteruskan ke onDelta; hasil penuh
+// dikembalikan sebagai ClaudeResponse tunggal.
+func CallClaudeStream(ctx context.Context, httpClient *http.Client, apiKey, model string, payload ClaudeRequest, onDelta func(string) error) (*ClaudeResponse, int, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	// Anthropic mewajibkan flag stream:true di body untuk SSE.
+	var bodyMap map[string]interface{}
+	_ = json.Unmarshal(body, &bodyMap)
+	bodyMap["stream"] = true
+	streamBody, _ := json.Marshal(bodyMap)
+	req.Body = io.NopCloser(bytes.NewReader(streamBody))
+	req.ContentLength = int64(len(streamBody))
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("rate limited (429): %s", string(b))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(b))
+	}
+
+	var fullText strings.Builder
+	var stopReason, respID, respModel string
+	scanner := bufio.NewScanner(resp.Body)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	event := ""
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event:") {
+			event = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if event == "message_start" {
+			var start struct {
+				Message struct {
+					ID    string `json:"id"`
+					Model string `json:"model"`
+				} `json:"message"`
+			}
+			if json.Unmarshal([]byte(data), &start) == nil {
+				respID, respModel = start.Message.ID, start.Message.Model
+			}
+			continue
+		}
+		if event == "content_block_delta" {
+			var delta struct {
+				Delta struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &delta) == nil && delta.Delta.Text != "" {
+				fullText.WriteString(delta.Delta.Text)
+				if onDelta != nil {
+					_ = onDelta(delta.Delta.Text)
+				}
+			}
+			continue
+		}
+		if event == "message_delta" {
+			var md struct {
+				Delta struct {
+					StopReason string `json:"stop_reason"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal([]byte(data), &md) == nil && md.Delta.StopReason != "" {
+				stopReason = md.Delta.StopReason
+			}
+			continue
+		}
+	}
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		if fullText.Len() == 0 {
+			return nil, 0, fmt.Errorf("stream read error: %w", err)
+		}
+	}
+
+	if respModel == "" {
+		respModel = model
+	}
+	claudeResp := &ClaudeResponse{
+		ID:    respID,
+		Type:  "message",
+		Role:  "assistant",
+		Model: respModel,
+		Content: []ClaudeContentBlock{
+			{Type: "text", Text: fullText.String()},
+		},
+		StopReason: stopReason,
+	}
+	return claudeResp, http.StatusOK, nil
 }
 
 func ConvertClaudeToOpenAIFormat(claudeResp *ClaudeResponse, model string) map[string]interface{} {
@@ -193,9 +315,9 @@ func BuildClaudePayload(messages []Message, model string, data map[string]interf
 	}
 
 	payload := ClaudeRequest{
-		Model:     model,
-		Messages:  formattedMessages,
-		MaxTokens: genLimit,
+		Model:       model,
+		Messages:    formattedMessages,
+		MaxTokens:   genLimit,
 		Temperature: &temp,
 	}
 

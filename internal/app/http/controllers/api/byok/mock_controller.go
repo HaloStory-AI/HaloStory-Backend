@@ -26,6 +26,7 @@ type MockChatRequest struct {
 	HistoryDepth *int           `json:"history_depth,omitempty"`
 	IsSummarize  *bool          `json:"is_summarize,omitempty"`
 	IsGroup      *bool          `json:"is_group,omitempty"`
+	Stream       *bool          `json:"stream,omitempty"`
 }
 
 func MockChat(c *gin.Context) {
@@ -130,6 +131,9 @@ func buildMockPayload(req MockChatRequest, userID uint, uid, model string) map[s
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
+	}
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
 	}
 
 	return payload

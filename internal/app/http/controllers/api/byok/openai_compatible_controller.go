@@ -44,6 +44,7 @@ type OpenAICompatibleChatRequest struct {
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
 	ContextLimit      *int                    `json:"context_limit,omitempty"`
+	Stream            *bool                   `json:"stream,omitempty"`
 }
 
 func OpenAICompatibleChat(c *gin.Context) {
@@ -249,6 +250,9 @@ func buildOpenAIPayload(req OpenAICompatibleChatRequest, encryptedKey, messagesB
 	}
 	if req.ContextLimit != nil {
 		payload["context_limit"] = *req.ContextLimit
+	}
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
 	}
 	return payload
 }

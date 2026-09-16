@@ -44,6 +44,7 @@ type OpenAIProviderRequest struct {
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
 	ContextLimit      *int                    `json:"context_limit,omitempty"`
+	Stream            *bool                   `json:"stream,omitempty"`
 }
 
 func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, provider, defaultModel string) {
@@ -211,6 +212,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	}
 	if req.ContextLimit != nil {
 		payload["context_limit"] = *req.ContextLimit
+	}
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

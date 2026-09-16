@@ -35,6 +35,7 @@ type SystemChatRequest struct {
 	Stop             []string                 `json:"stop,omitempty"`
 	ReasoningEnabled *bool                    `json:"reasoning_enabled,omitempty"`
 	ContextLimit     *int                     `json:"context_limit,omitempty"`
+	Stream           *bool                    `json:"stream,omitempty"`
 }
 
 type SummarizeRequest struct {
@@ -150,6 +151,10 @@ func SystemChat(c *gin.Context) {
 	}
 	if len(req.Stop) > 0 {
 		payload["stop"] = req.Stop
+	}
+	// Stream flag: nil/absen = false (pengguna lama tetap polling).
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

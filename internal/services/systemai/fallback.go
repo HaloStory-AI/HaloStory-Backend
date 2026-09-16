@@ -1,12 +1,14 @@
 package systemai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/services/byok"
+	"halostory_go_backend/internal/utils"
 )
 
 func buildChain(isVip bool) []ChainEntry {
@@ -119,7 +121,7 @@ func extractContent(m map[string]interface{}) string {
 	return content
 }
 
-func RunFallbackChain(httpClient *http.Client,messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
+func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *SystemAIChatParams, isVip bool) *ChainResult {
 	chain := buildChain(isVip)
 	entry := chain[0]
 
@@ -153,6 +155,90 @@ func RunFallbackChain(httpClient *http.Client,messages []byok.Message, params *S
 			Error:      fmt.Sprintf("router request failed: %v", err),
 			Pings:      pings,
 		}
+	}
+
+	normalized, content := normalizeResponse(openaiResp)
+	if content == "" {
+		pings = append(pings, PingLog{
+			Provider: entry.Provider,
+			Model:    entry.Model,
+			Status:   "error",
+			Detail:   "empty response content",
+		})
+		return &ChainResult{
+			StatusCode: code,
+			Error:      "router returned empty response content",
+			Pings:      pings,
+		}
+	}
+
+	pings = append(pings, PingLog{
+		Provider: entry.Provider,
+		Model:    entry.Model,
+		Status:   "success",
+	})
+	return &ChainResult{
+		Response:   normalized,
+		Content:    content,
+		StatusCode: code,
+		Pings:      pings,
+	}
+}
+
+// RunFallbackChainStream sama seperti RunFallbackChain tapi memakai SSE streaming
+// ke upstream (router OpenAI-compatible). Setiap delta mentah difilter via
+// StreamSanitizer sebelum diteruskan ke onDelta agar bond tags/<think> tidak
+// bocor ke frontend. Hasil akhir authoritatif tetap via ParseBondTags
+// post-completion di worker; onDone menerima sisa flush sanitizer.
+func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params *SystemAIChatParams, isVip bool, onDelta func(string) error) *ChainResult {
+	chain := buildChain(isVip)
+	entry := chain[0]
+
+	pings := make([]PingLog, 0)
+
+	apiKey := config.Env("ROUTER_SYSTEM_KEY", "")
+	if apiKey == "" {
+		return &ChainResult{
+			StatusCode: 503,
+			Error:      "router API key not configured",
+			Pings: []PingLog{{
+				Provider: entry.Provider,
+				Model:    entry.Model,
+				Status:   "error",
+				Detail:   "no API key configured",
+			}},
+		}
+	}
+
+	reqPayload := buildOpenAIRequest(messages, entry)
+	sanitizer := &byok.StreamSanitizer{}
+	streamClient := utils.NewAIHttpClientNoTimeout()
+	filteredDelta := func(raw string) error {
+		if clean := sanitizer.Feed(raw); clean != "" && onDelta != nil {
+			if err := onDelta(clean); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	openaiResp, code, err := byok.CallOpenAIStream(ctx, streamClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, nil, filteredDelta)
+	if err != nil {
+		pings = append(pings, PingLog{
+			Provider: entry.Provider,
+			Model:    entry.Model,
+			Status:   "error",
+			Detail:   err.Error(),
+		})
+		return &ChainResult{
+			StatusCode: code,
+			Error:      fmt.Sprintf("router stream request failed: %v", err),
+			Pings:      pings,
+		}
+	}
+
+	// Flush sisa sanitizer agar delta terakhir tidak hilang.
+	if rest := sanitizer.Flush(); rest != "" && onDelta != nil {
+		_ = onDelta(rest)
 	}
 
 	normalized, content := normalizeResponse(openaiResp)

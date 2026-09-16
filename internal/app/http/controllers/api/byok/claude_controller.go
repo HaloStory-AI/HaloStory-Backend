@@ -38,6 +38,7 @@ type ClaudeChatRequest struct {
 	BotIDs           []string                `json:"bot_ids,omitempty"`
 	BotID            *string                 `json:"bot_id,omitempty"`
 	ContextLimit     *int                    `json:"context_limit,omitempty"`
+	Stream           *bool                   `json:"stream,omitempty"`
 }
 
 func ClaudeChat(c *gin.Context) {
@@ -186,6 +187,9 @@ func ClaudeChat(c *gin.Context) {
 	}
 	if req.ContextLimit != nil {
 		payload["context_limit"] = *req.ContextLimit
+	}
+	if req.Stream != nil && *req.Stream {
+		payload["is_stream"] = true
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

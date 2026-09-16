@@ -1,7 +1,9 @@
 package byok
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,8 +18,8 @@ type GeminiPart struct {
 }
 
 type GeminiContent struct {
-	Role  string        `json:"role"`
-	Parts []GeminiPart  `json:"parts"`
+	Role  string       `json:"role"`
+	Parts []GeminiPart `json:"parts"`
 }
 
 type SafetySetting struct {
@@ -32,13 +34,13 @@ type ThinkingConfig struct {
 }
 
 type GenerationConfig struct {
-	Temperature      float64        `json:"temperature,omitempty"`
-	TopP             float64        `json:"topP,omitempty"`
-	TopK             int            `json:"topK,omitempty"`
-	MaxOutputTokens  int            `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string       `json:"stopSequences,omitempty"`
-	PresencePenalty  float64        `json:"presencePenalty,omitempty"`
-	FrequencyPenalty float64        `json:"frequencyPenalty,omitempty"`
+	Temperature      float64         `json:"temperature,omitempty"`
+	TopP             float64         `json:"topP,omitempty"`
+	TopK             int             `json:"topK,omitempty"`
+	MaxOutputTokens  int             `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string        `json:"stopSequences,omitempty"`
+	PresencePenalty  float64         `json:"presencePenalty,omitempty"`
+	FrequencyPenalty float64         `json:"frequencyPenalty,omitempty"`
 	ThinkingConfig   *ThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
@@ -50,9 +52,9 @@ type GeminiRequest struct {
 }
 
 type GeminiResponse struct {
-	Candidates    []GeminiCandidate `json:"candidates"`
-	PromptFeedback *PromptFeedback  `json:"promptFeedback"`
-	UsageMetadata  *UsageMetadata   `json:"usageMetadata"`
+	Candidates     []GeminiCandidate `json:"candidates"`
+	PromptFeedback *PromptFeedback   `json:"promptFeedback"`
+	UsageMetadata  *UsageMetadata    `json:"usageMetadata"`
 }
 
 type GeminiCandidate struct {
@@ -93,11 +95,11 @@ type OpenAIResponse struct {
 }
 
 var DefaultSafetySettings = []SafetySetting{
-	{Category: "HARM_CATEGORY_HARASSMENT",        Threshold: "BLOCK_NONE"},
-	{Category: "HARM_CATEGORY_HATE_SPEECH",       Threshold: "BLOCK_NONE"},
+	{Category: "HARM_CATEGORY_HARASSMENT", Threshold: "BLOCK_NONE"},
+	{Category: "HARM_CATEGORY_HATE_SPEECH", Threshold: "BLOCK_NONE"},
 	{Category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", Threshold: "BLOCK_NONE"},
 	{Category: "HARM_CATEGORY_DANGEROUS_CONTENT", Threshold: "BLOCK_NONE"},
-	{Category: "HARM_CATEGORY_CIVIC_INTEGRITY",   Threshold: "BLOCK_NONE"},
+	{Category: "HARM_CATEGORY_CIVIC_INTEGRITY", Threshold: "BLOCK_NONE"},
 }
 
 func CallGemini(apiKey string, model string, payload GeminiRequest) (*GeminiResponse, int, error) {
@@ -143,6 +145,112 @@ func CallGemini(apiKey string, model string, payload GeminiRequest) (*GeminiResp
 	}
 
 	return &geminiResp, resp.StatusCode, nil
+}
+
+// CallGeminiStream memakai endpoint streamGenerateContent (SSE, alt=sse).
+// Setiap delta teks diteruskan ke onDelta; hasil penuh dikembalikan sebagai
+// GeminiResponse tunggal agar caller bisa memakai ConvertToOpenAIFormat yang sama.
+func CallGeminiStream(ctx context.Context, httpClient *http.Client, apiKey string, model string, payload GeminiRequest, onDelta func(string) error) (*GeminiResponse, int, error) {
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse", model)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("x-goog-api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 {
+		return nil, resp.StatusCode, fmt.Errorf("rate limited (429)")
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, resp.StatusCode, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var fullText strings.Builder
+	var lastResp *GeminiResponse
+	var blockReason, blockReasonMessage string
+	scanner := bufio.NewScanner(resp.Body)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			break
+		}
+		var chunk GeminiResponse
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			continue
+		}
+		if chunk.PromptFeedback != nil {
+			if chunk.PromptFeedback.BlockReason != "" {
+				blockReason = chunk.PromptFeedback.BlockReason
+			}
+			if chunk.PromptFeedback.BlockReasonMessage != "" {
+				blockReasonMessage = chunk.PromptFeedback.BlockReasonMessage
+			}
+		}
+		for _, cand := range chunk.Candidates {
+			for _, part := range cand.Content.Parts {
+				if part.Thought != nil && *part.Thought {
+					continue
+				}
+				if part.Text != "" {
+					fullText.WriteString(part.Text)
+					if onDelta != nil {
+						_ = onDelta(part.Text)
+					}
+				}
+			}
+		}
+		lastResp = &chunk
+	}
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		if fullText.Len() == 0 && lastResp == nil {
+			return nil, 0, fmt.Errorf("stream read error: %w", err)
+		}
+	}
+
+	merged := &GeminiResponse{}
+	if lastResp != nil {
+		*merged = *lastResp
+	}
+	merged.Candidates = []GeminiCandidate{{
+		Content: GeminiContent{
+			Role:  "model",
+			Parts: []GeminiPart{{Text: fullText.String()}},
+		},
+		FinishReason: "STOP",
+	}}
+	if len(merged.Candidates) > 0 && lastResp != nil && len(lastResp.Candidates) > 0 && lastResp.Candidates[0].FinishReason != "" {
+		merged.Candidates[0].FinishReason = lastResp.Candidates[0].FinishReason
+	}
+	if blockReason != "" || blockReasonMessage != "" {
+		merged.PromptFeedback = &PromptFeedback{BlockReason: blockReason, BlockReasonMessage: blockReasonMessage}
+	}
+	return merged, http.StatusOK, nil
 }
 
 func ConvertToOpenAIFormat(geminiResp *GeminiResponse, model string) *OpenAIResponse {
