@@ -28,6 +28,8 @@ type backupFileID struct {
 	FileID string `json:"file_id" form:"file_id" binding:"required"`
 }
 
+const maxBackupBytes = 50 * 1024 * 1024 // 50 MB
+
 func BackupStore(c *gin.Context) {
 	var input storeBackupInput
 	if err := c.ShouldBind(&input); err != nil {
@@ -49,41 +51,47 @@ func BackupStore(c *gin.Context) {
 		})
 		return
 	}
+	if len(input.Data) > maxBackupBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+			"message": "Backup too large (max 50 MB).",
+		})
+		return
+	}
 
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)
 
-	var existing models.UserBackup
-	result := database.DB.Where("user_id = ?", user.ID).First(&existing)
+	info, err := services.PutBackupObject(user.ID, []byte(input.Data))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, backupResponse{
+			Success: false,
+			Message: "Failed to save backup: " + err.Error(),
+		})
+		return
+	}
 
-	if result.Error == nil {
-		existing.Data = models.JSON(input.Data)
-		if err := database.DB.Save(&existing).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, backupResponse{
-				Success: false,
-				Message: "Failed to save backup: " + err.Error(),
-			})
-			return
-		}
-	} else {
-		backup := models.UserBackup{
-			UserID: user.ID,
-			Data:   models.JSON(input.Data),
-		}
-		if err := database.DB.Create(&backup).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, backupResponse{
-				Success: false,
-				Message: "Failed to create backup: " + err.Error(),
-			})
-			return
-		}
-		existing = backup
+	key := services.BackupObjectKey(user.ID)
+	size := info.Size
+	etag := info.ETag
+	backup := models.UserBackup{
+		UserID:    user.ID,
+		ObjectKey: &key,
+		SizeBytes: &size,
+		ETag:      &etag,
+	}
+	// Upsert metadata (Data tidak lagi dipakai)
+	if err := database.DB.Where("user_id = ?", user.ID).Assign(backup).FirstOrCreate(&backup).Error; err != nil {
+		log.Println("[WARN] backup metadata upsert failed: " + err.Error())
+	}
+	// Ambil timestamp terbaru dari DB atau dari R2 info
+	if backup.UpdatedAt.IsZero() {
+		backup.UpdatedAt = time.Now()
 	}
 
 	c.JSON(http.StatusOK, backupResponse{
 		Success:    true,
 		Message:    "Backup saved successfully.",
-		LastBackup: existing.UpdatedAt.Format("2006-01-02 15:04:05"),
+		LastBackup: backup.UpdatedAt.Format("2006-01-02 15:04:05"),
 	})
 }
 
@@ -91,10 +99,12 @@ func BackupRestore(c *gin.Context) {
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)
 
+	// Pastikan metadata ada (opsional) lalu ambil dari R2
 	var backup models.UserBackup
-	result := database.DB.Where("user_id = ?", user.ID).First(&backup)
+	_ = database.DB.Where("user_id = ?", user.ID).First(&backup).Error
 
-	if result.Error != nil {
+	data, err := services.GetBackupObject(user.ID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, backupResponse{
 			Success: false,
 			Message: "No backup found for this user.",
@@ -102,10 +112,17 @@ func BackupRestore(c *gin.Context) {
 		return
 	}
 
+	lastBackup := time.Now().Format("2006-01-02 15:04:05")
+	if !backup.UpdatedAt.IsZero() {
+		lastBackup = backup.UpdatedAt.Format("2006-01-02 15:04:05")
+	} else if info, err := services.StatBackupObject(user.ID); err == nil {
+		lastBackup = info.LastModified.Format("2006-01-02 15:04:05")
+	}
+
 	c.JSON(http.StatusOK, backupResponse{
 		Success:    true,
-		Data:       string(backup.Data),
-		LastBackup: backup.UpdatedAt.Format("2006-01-02 15:04:05"),
+		Data:       string(data),
+		LastBackup: lastBackup,
 	})
 }
 

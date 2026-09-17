@@ -31,8 +31,11 @@ func (j *JSON) Scan(value interface{}) error {
 
 type UserBackup struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	UserID    uint      `gorm:"index" json:"user_id"`
-	Data      JSON      `gorm:"type:longtext" json:"data"`
+	UserID    uint      `gorm:"uniqueIndex" json:"user_id"`
+	Data      *JSON     `gorm:"type:longtext" json:"-"`
+	ObjectKey *string   `gorm:"type:varchar(512)" json:"object_key"`
+	SizeBytes *int64    `json:"size_bytes"`
+	ETag      *string   `gorm:"type:varchar(64)" json:"etag"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

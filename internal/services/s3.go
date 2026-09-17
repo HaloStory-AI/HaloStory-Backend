@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 
@@ -70,3 +71,59 @@ func UploadObject(objectKey string, data []byte, contentType string) error {
 	)
 	return err
 }
+
+// ── Backup R2 helpers (overwrite latest.enc) ──
+
+func backupKey(userID uint) string {
+	return fmt.Sprintf("backups/%d/latest.enc", userID)
+}
+
+// PutBackupObject menulis backup terenkripsi user ke R2 (overwrite).
+func PutBackupObject(userID uint, data []byte) (minio.UploadInfo, error) {
+	if MinioClient == nil || S3Bucket == "" {
+		return minio.UploadInfo{}, fmt.Errorf("S3 client is not initialized")
+	}
+	return MinioClient.PutObject(
+		context.Background(),
+		S3Bucket,
+		backupKey(userID),
+		bytes.NewReader(data),
+		int64(len(data)),
+		minio.PutObjectOptions{ContentType: "application/octet-stream"},
+	)
+}
+
+// GetBackupObject membaca backup dari R2.
+func GetBackupObject(userID uint) ([]byte, error) {
+	if MinioClient == nil || S3Bucket == "" {
+		return nil, fmt.Errorf("S3 client is not initialized")
+	}
+	obj, err := MinioClient.GetObject(context.Background(), S3Bucket, backupKey(userID), minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer obj.Close()
+	stat, err := obj.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if stat.Size == 0 {
+		return nil, fmt.Errorf("backup empty")
+	}
+	buf, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// StatBackupObject mengembalikan metadata objek backup.
+func StatBackupObject(userID uint) (minio.ObjectInfo, error) {
+	if MinioClient == nil || S3Bucket == "" {
+		return minio.ObjectInfo{}, fmt.Errorf("S3 client is not initialized")
+	}
+	return MinioClient.StatObject(context.Background(), S3Bucket, backupKey(userID), minio.StatObjectOptions{})
+}
+
+// BackupObjectKey mengembalikan key R2 untuk user (dipakai controller untuk metadata).
+func BackupObjectKey(userID uint) string { return backupKey(userID) }

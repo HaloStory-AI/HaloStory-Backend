@@ -295,8 +295,15 @@ func Refresh(c *gin.Context) {
 	}
 
 	if rt.RevokedAt != nil {
+		// Reuse detection: token sudah di-rotate tapi dipakai lagi → kemungkinan theft.
+		// Revoke semua refresh token user untuk memaksa re-login di semua device.
+		log.Printf("[SECURITY] Refresh token reuse detected for user %d (token %d)", rt.UserID, rt.ID)
+		nowReuse := time.Now()
+		_ = database.DB.Model(&models.RefreshToken{}).
+			Where("user_id = ? AND revoked_at IS NULL", rt.UserID).
+			Update("revoked_at", nowReuse).Error
 		c.JSON(http.StatusUnauthorized, gin.H{
-			"message": "Refresh token sudah tidak berlaku",
+			"message": "Refresh token reuse detected, please login again",
 		})
 		return
 	}
