@@ -249,7 +249,29 @@ func processJob(rawData []byte) {
 
 	if data.UserID > 0 {
 		userID := uint(data.UserID)
-		database.DB.Create(&models.UserActivity{UserID: userID})
+		at := "chat"
+		if isSummarize, _ := payload["is_summarize"].(bool); isSummarize {
+			at = "chat_summarize"
+		}
+		botID := ""
+		if v, _ := payload["bot_id"].(string); v != "" {
+			botID = v
+		}
+		prov := ""
+		if v, _ := payload["provider"].(string); v != "" {
+			prov = v
+		}
+		// fire-and-forget (worker tidak punya IP, simpan anon kosong)
+		go func(uid uint, a, b, p string) {
+			var bID, provPtr *string
+			if b != "" {
+				bID = &b
+			}
+			if p != "" {
+				provPtr = &p
+			}
+			_ = database.DB.Create(&models.UserActivity{UserID: uid, ActivityType: a, BotID: bID, Provider: provPtr}).Error
+		}(userID, at, botID, prov)
 	}
 
 	// Fase 2: registry validate + circuit check (non-blocking, fallback to old switch)

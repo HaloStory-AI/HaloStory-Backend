@@ -153,6 +153,9 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/student-requests", apiControllers.StudentRequestStore)
 	protected.POST("/student-request/check", apiControllers.StudentRequestCheck)
 
+	// Activity tracking (api_hit logging for protected routes)
+	protected.Use(middlewares.ActivityLogger())
+
 	// Verified-only routes (require email verification)
 	verified := protected.Group("/", middlewares.EnsureEmailIsVerified())
 	{
@@ -199,6 +202,8 @@ func SetupAPI(r *gin.Engine) {
 		admin.POST("/users/:id/unban", apiControllers.AdminUnbanUser)
 		admin.DELETE("/users/:id", apiControllers.AdminDeleteUser)
 
+		admin.GET("/activities", apiControllers.AdminGetActivities)
+		admin.GET("/activities/summary", apiControllers.AdminGetActivitiesSummary)
 		admin.GET("/bots", apiControllers.AdminGetBots)
 		admin.POST("/bots", apiControllers.AdminStoreBot)
 		admin.POST("/bots/import", apiControllers.AdminImportBots)

@@ -27,15 +27,24 @@ func StartScheduler() *cron.Cron {
 	c.AddFunc("@every 1m", cleanExpiredStories)
 	c.AddFunc("@every 10m", CleanExpiredChatJobs)
 	c.AddFunc("@every 1h", makeStories)
-	c.AddFunc("0 0 * * *", sendHourlyAnalytics)
-	c.AddFunc("0 0 * * 0", sendDailyAnalytics)
-	c.AddFunc("0 0 1 * *", sendWeeklyAnalytics)
-	c.AddFunc("0 0 1 1 *", sendMonthlyAnalytics)
-	c.AddFunc("0 0 0 * * 0", cleanupAnalytics)
+	// Cron unchanged (rename only): keep legacy schedule, rename handlers to match cron
+	c.AddFunc("0 0 * * *", sendDailyMidnightReport)
+	c.AddFunc("0 0 * * 0", sendWeeklySundayReport)
+	c.AddFunc("0 0 1 * *", sendMonthlyFirstReport)
+	c.AddFunc("0 0 1 1 *", sendYearlyJan1Report)
+	c.AddFunc("0 5 * * *", rollupDaily) // daily rollup 00:05
+	c.AddFunc("0 0 * * 0", cleanupAnalytics)
 
 	c.Start()
 	log.Println("Scheduler: Started with tasks: unban-expired, clean-stories, clean-chat-jobs, make-stories, analytics")
 	return c
+}
+
+func rollupDaily() {
+	yesterday := time.Now().AddDate(0, 0, -1)
+	if err := RollupDaily(yesterday); err != nil {
+		log.Printf("Analytics: RollupDaily failed: %v", err)
+	}
 }
 
 func unbanExpired() {
@@ -424,35 +433,40 @@ func buildMonthlyReport() string {
 	return strings.Join(lines, "\n")
 }
 
-func sendHourlyAnalytics() {
-	log.Println("Analytics: Sending hourly report...")
+func sendHourlyAnalytics() { sendDailyMidnightReport() }
+func sendDailyAnalytics() { sendWeeklySundayReport() }
+func sendWeeklyAnalytics() { sendMonthlyFirstReport() }
+func sendMonthlyAnalytics() { sendYearlyJan1Report() }
+
+func sendDailyMidnightReport() {
+	log.Println("Analytics: Sending daily-midnight (24h) report...")
 	msg := buildHourlyReport()
 	sendTelegramMessage(msg)
 }
 
-func sendDailyAnalytics() {
-	log.Println("Analytics: Sending daily report...")
+func sendWeeklySundayReport() {
+	log.Println("Analytics: Sending weekly-Sunday (7d) report...")
 	msg := buildDailyReport()
 	sendTelegramMessage(msg)
 }
 
-func sendWeeklyAnalytics() {
-	log.Println("Analytics: Sending weekly report...")
+func sendMonthlyFirstReport() {
+	log.Println("Analytics: Sending monthly-first (4w) report...")
 	msg := buildWeeklyReport()
 	sendTelegramMessage(msg)
 }
 
-func sendMonthlyAnalytics() {
-	log.Println("Analytics: Sending monthly report...")
+func sendYearlyJan1Report() {
+	log.Println("Analytics: Sending yearly-Jan1 (12m) report...")
 	msg := buildMonthlyReport()
 	sendTelegramMessage(msg)
 }
 
 func cleanupAnalytics() {
-	log.Println("Analytics: Cleaning up old activity records...")
+	log.Println("Analytics: Cleaning up old activity records (90d raw, 730d rollup)...")
 
 	result := database.DB.Exec(
-		"DELETE FROM user_activities WHERE created_at < NOW() - INTERVAL 365 DAY",
+		"DELETE FROM user_activities WHERE created_at < NOW() - INTERVAL 90 DAY",
 	)
 
 	if result.Error != nil {
@@ -464,5 +478,12 @@ func cleanupAnalytics() {
 		log.Printf("Analytics: Deleted %d old activity records", result.RowsAffected)
 	} else {
 		log.Println("Analytics: No old activities found")
+	}
+
+	r2 := database.DB.Exec("DELETE FROM activity_daily_rollups WHERE date < CURDATE() - INTERVAL 730 DAY")
+	if r2.Error != nil {
+		log.Printf("Analytics: Error cleaning rollups: %v", r2.Error)
+	} else if r2.RowsAffected > 0 {
+		log.Printf("Analytics: Deleted %d old rollup rows", r2.RowsAffected)
 	}
 }

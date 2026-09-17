@@ -462,6 +462,7 @@ func Login(c *gin.Context) {
 		"user":               user,
 		"has_local_password": true,
 	})
+	services.LogActivity(user.ID, "login", "", "", c.ClientIP(), c.GetHeader("User-Agent"), nil)
 }
 
 func formatValidationErrors(err error) (int, gin.H) {
@@ -652,4 +653,5 @@ func Register(c *gin.Context) {
 		"user":               user,
 		"has_local_password": true,
 	})
+	services.LogActivity(user.ID, "login", "", "", c.ClientIP(), c.GetHeader("User-Agent"), nil)
 }

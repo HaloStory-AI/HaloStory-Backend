@@ -145,6 +145,7 @@ func AdminDeleteUser(c *gin.Context) {
 		})
 		return
 	}
+	database.DB.Where("user_id = ?", userID).Delete(&models.UserActivity{})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "User deleted successfully",
