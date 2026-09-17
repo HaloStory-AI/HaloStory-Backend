@@ -281,7 +281,7 @@ func BuildClaudePayload(messages []Message, model string, data map[string]interf
 			if systemPrompt != "" {
 				systemPrompt += "\n"
 			}
-			systemPrompt += msg.Content
+			systemPrompt += msg.Content.AsText()
 			continue
 		}
 
@@ -291,9 +291,9 @@ func BuildClaudePayload(messages []Message, model string, data map[string]interf
 		}
 
 		if lastRole == role && len(formattedMessages) > 0 {
-			formattedMessages[len(formattedMessages)-1].Content += "\n\n" + msg.Content
+			formattedMessages[len(formattedMessages)-1].Content += "\n\n" + msg.Content.AsText()
 		} else {
-			formattedMessages = append(formattedMessages, ClaudeMessage{Role: role, Content: msg.Content})
+			formattedMessages = append(formattedMessages, ClaudeMessage{Role: role, Content: msg.Content.AsText()})
 			lastRole = role
 		}
 	}

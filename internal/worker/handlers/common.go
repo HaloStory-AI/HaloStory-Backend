@@ -114,13 +114,13 @@ func PreparePromptMessages(
 	if loreInjection != "" {
 		for i, m := range messages {
 			if m.Role == "system" {
-				messages[i].Content += loreInjection
+				messages[i].Content = byok.NewTextContent(m.Content.AsText() + loreInjection)
 				loreInjection = ""
 				break
 			}
 		}
 		if loreInjection != "" {
-			messages = append([]byok.Message{{Role: "system", Content: loreInjection}}, messages...)
+			messages = append([]byok.Message{{Role: "system", Content: byok.NewTextContent(loreInjection)}}, messages...)
 		}
 	}
 	if isGroup && len(botIDs) > 1 {
@@ -130,7 +130,7 @@ func PreparePromptMessages(
 	return messages
 }
 
-// FormatOpenAIMessages converts internal messages to OpenAI chat messages.
+// FormatOpenAIMessages converts internal messages to OpenAI chat messages (vision-aware).
 func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 	out := make([]byok.OpenAIChatMessage, 0, len(messages))
 	for _, m := range messages {
@@ -138,7 +138,31 @@ func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 		if role != "system" && role != "assistant" {
 			role = "user"
 		}
-		out = append(out, byok.OpenAIChatMessage{Role: role, Content: m.Content})
+		var content interface{}
+		if m.Content.HasImage() {
+			parts := make([]byok.ContentPart, 0, len(m.Content.Parts())+1)
+			for _, p := range m.Content.Parts() {
+				parts = append(parts, p)
+			}
+			// Ensure text part exists; if AsText empty, keep image only
+			hasText := false
+			for _, p := range parts {
+				if p.Type == "text" {
+					hasText = true
+					break
+				}
+			}
+			if !hasText {
+				txt := m.Content.AsText()
+				if txt != "" {
+					parts = append(parts, byok.ContentPart{Type: "text", Text: &txt})
+				}
+			}
+			content = parts
+		} else {
+			content = m.Content.AsText()
+		}
+		out = append(out, byok.OpenAIChatMessage{Role: role, Content: content})
 	}
 	return out
 }
@@ -147,7 +171,7 @@ func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 func LastUserMessage(originalMessages []byok.Message) string {
 	for i := len(originalMessages) - 1; i >= 0; i-- {
 		if originalMessages[i].Role == "user" {
-			return originalMessages[i].Content
+			return originalMessages[i].Content.AsText()
 		}
 	}
 	return ""

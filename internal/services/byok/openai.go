@@ -13,8 +13,8 @@ import (
 )
 
 type OpenAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"` // string OR []ContentPart (vision)
 }
 
 type OpenAICompatRequest struct {

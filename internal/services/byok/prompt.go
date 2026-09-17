@@ -23,7 +23,10 @@ func PruneHistory(messages []Message, depth int, limit *int) []Message {
 		pruned := make([]Message, 0)
 
 		for i := len(messages) - 1; i >= 0; i-- {
-			msgChars := len(messages[i].Content)
+			msgChars := len(messages[i].Content.AsText())
+			if messages[i].Content.HasImage() {
+				msgChars += 85 // vision token estimate per image
+			}
 			if currentChars+msgChars <= charLimit {
 				pruned = append([]Message{messages[i]}, pruned...)
 				currentChars += msgChars
@@ -51,13 +54,13 @@ func PruneHistoryV2(messages []Message, depth int, tokenBudget *int, model strin
 	// Convert to tokenizer.ChatMessage
 	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
 	for i, m := range messages {
-		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content.AsText()}
 	}
 	truncated := tokenizer.Default.TruncateToBudget(tokMsgs, *tokenBudget, model)
-	// Convert back
+	// Convert back - preserve vision by matching on text? fallback to text-only for truncated
 	out := make([]Message, len(truncated))
 	for i, m := range truncated {
-		out[i] = Message{Role: m.Role, Content: m.Content}
+		out[i] = Message{Role: m.Role, Content: NewTextContent(m.Content)}
 	}
 	return out
 }
@@ -76,7 +79,7 @@ func CountChatTokens(messages []Message, model string) int {
 	}
 	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
 	for i, m := range messages {
-		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content}
+		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content.AsText()}
 	}
 	return tokenizer.Default.CountChatTokens(tokMsgs, model)
 }
@@ -121,7 +124,7 @@ func InjectByokSystemPrompt(
 			if systemNote != "" {
 				systemNote += "\n\n"
 			}
-			systemNote += msg.Content
+			systemNote += msg.Content.AsText()
 		} else {
 			cleanedMessages = append(cleanedMessages, msg)
 		}
@@ -151,7 +154,7 @@ func InjectByokSystemPrompt(
 	}
 
 	if finalSystemPrompt != "" {
-		cleanedMessages = append([]Message{{Role: "system", Content: finalSystemPrompt}}, cleanedMessages...)
+		cleanedMessages = append([]Message{{Role: "system", Content: NewTextContent(finalSystemPrompt)}}, cleanedMessages...)
 	}
 
 	return cleanedMessages
@@ -231,7 +234,7 @@ func InjectByokSystemPromptWithModelTrusted(
 			if systemNote != "" {
 				systemNote += "\n\n"
 			}
-			systemNote += msg.Content
+			systemNote += msg.Content.AsText()
 		} else {
 			cleanedMessages = append(cleanedMessages, msg)
 		}
@@ -263,7 +266,7 @@ func InjectByokSystemPromptWithModelTrusted(
 	}
 
 	if finalSystemPrompt != "" {
-		cleanedMessages = append([]Message{{Role: "system", Content: finalSystemPrompt}}, cleanedMessages...)
+		cleanedMessages = append([]Message{{Role: "system", Content: NewTextContent(finalSystemPrompt)}}, cleanedMessages...)
 	}
 
 	return cleanedMessages
@@ -636,12 +639,12 @@ func InjectGroupContext(messages []Message, botIDs []string, primaryBotID *strin
 
 	for i, msg := range messages {
 		if msg.Role == "system" {
-			messages[i].Content += context
+			messages[i].Content = NewTextContent(msg.Content.AsText() + context)
 			return messages
 		}
 	}
 
-	return append([]Message{{Role: "system", Content: context}}, messages...)
+	return append([]Message{{Role: "system", Content: NewTextContent(context)}}, messages...)
 }
 
 func BuildSummarizationPrompt(messages []Message, language string, existingMemories []string) string {
@@ -651,7 +654,7 @@ func BuildSummarizationPrompt(messages []Message, language string, existingMemor
 		if msg.Role == "assistant" {
 			role = "Assistant"
 		}
-		textToSummarize += fmt.Sprintf("%s: %s\n", role, msg.Content)
+		textToSummarize += fmt.Sprintf("%s: %s\n", role, msg.Content.AsText())
 	}
 
 	lang := language

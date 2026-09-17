@@ -47,9 +47,19 @@ func buildOpenAIRequest(messages []byok.Message, entry ChainEntry) byok.OpenAICo
 		} else {
 			role = "user"
 		}
+		var content interface{}
+		if msg.Content.HasImage() {
+			parts := make([]byok.ContentPart, 0, len(msg.Content.Parts()))
+			for _, p := range msg.Content.Parts() {
+				parts = append(parts, p)
+			}
+			content = parts
+		} else {
+			content = msg.Content.AsText()
+		}
 		openaiMessages = append(openaiMessages, byok.OpenAIChatMessage{
 			Role:    role,
-			Content: msg.Content,
+			Content: content,
 		})
 	}
 
@@ -93,7 +103,9 @@ func normalizeResponse(response interface{}) (map[string]interface{}, string) {
 	case *byok.OpenAICompatResponse:
 		content := ""
 		if len(v.Choices) > 0 {
-			content = v.Choices[0].Message.Content
+			if s, ok := v.Choices[0].Message.Content.(string); ok {
+				content = s
+			}
 		}
 		data, _ := json.Marshal(v)
 		var result map[string]interface{}

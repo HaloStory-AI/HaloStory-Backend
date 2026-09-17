@@ -109,13 +109,13 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 	if loreInjection != "" {
 		for i, m := range messages {
 			if m.Role == "system" {
-				messages[i].Content += loreInjection
+				messages[i].Content = byok.NewTextContent(m.Content.AsText() + loreInjection)
 				loreInjection = ""
 				break
 			}
 		}
 		if loreInjection != "" {
-			messages = append([]byok.Message{{Role: "system", Content: loreInjection}}, messages...)
+			messages = append([]byok.Message{{Role: "system", Content: byok.NewTextContent(loreInjection)}}, messages...)
 		}
 	}
 	if data.IsGroup && len(data.BotIDs) > 1 {
@@ -162,7 +162,7 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 	lastUserMessage := ""
 	for i := len(originalMessages) - 1; i >= 0; i-- {
 		if originalMessages[i].Role == "user" {
-			lastUserMessage = originalMessages[i].Content
+			lastUserMessage = originalMessages[i].Content.AsText()
 			break
 		}
 	}

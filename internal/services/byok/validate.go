@@ -1,6 +1,8 @@
 ﻿package byok
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -45,9 +47,121 @@ type BYOKRequest struct {
 	SourceIP         string           `json:"-"`
 }
 
+const ChatImageMaxBytes = 5 << 20 // 5 MB decoded
+
+type ImageURL struct {
+	URL    string  `json:"url"`
+	Detail *string `json:"detail,omitempty"`
+}
+
+type ContentPart struct {
+	Type     string    `json:"type"`
+	Text     *string   `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// VisionContent is polymorphic: string OR []ContentPart (OpenAI standard).
+type VisionContent struct {
+	isArray bool
+	text    string
+	parts   []ContentPart
+}
+
+func (v VisionContent) IsArray() bool          { return v.isArray }
+func (v VisionContent) AsText() string {
+	if v.isArray {
+		var sb strings.Builder
+		for _, p := range v.parts {
+			if p.Type == "text" && p.Text != nil {
+				if sb.Len() > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(*p.Text)
+			}
+		}
+		return sb.String()
+	}
+	return v.text
+}
+func (v VisionContent) Parts() []ContentPart {
+	if v.isArray {
+		return v.parts
+	}
+	return nil
+}
+func (v VisionContent) HasImage() bool {
+	if !v.isArray {
+		return false
+	}
+	for _, p := range v.parts {
+		if p.Type == "image_url" && p.ImageURL != nil && p.ImageURL.URL != "" {
+			return true
+		}
+	}
+	return false
+}
+func (v VisionContent) ImageURLs() []string {
+	var out []string
+	for _, p := range v.parts {
+		if p.Type == "image_url" && p.ImageURL != nil {
+			out = append(out, p.ImageURL.URL)
+		}
+	}
+	return out
+}
+func (v VisionContent) MarshalJSON() ([]byte, error) {
+	if v.isArray {
+		return json.Marshal(v.parts)
+	}
+	return json.Marshal(v.text)
+}
+func (v *VisionContent) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if len(trimmed) == 0 {
+		v.isArray = false
+		v.text = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+		v.isArray = false
+		v.text = s
+		v.parts = nil
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var parts []ContentPart
+		if err := json.Unmarshal(data, &parts); err != nil {
+			return err
+		}
+		v.isArray = true
+		v.parts = parts
+		v.text = ""
+		return nil
+	}
+	// fallback try string
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		v.isArray = false
+		v.text = s
+		return nil
+	}
+	return fmt.Errorf("VisionContent must be string or array")
+}
+
+func NewTextContent(text string) VisionContent {
+	return VisionContent{isArray: false, text: text}
+}
+func NewVisionContent(parts []ContentPart) VisionContent {
+	return VisionContent{isArray: true, parts: parts}
+}
+
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string        `json:"role"`
+	Content VisionContent `json:"content"`
 }
 
 type ReasoningConfig struct {
@@ -73,11 +187,11 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 		return err
 	}
 
-	// Message structural checks: content must be a non-empty string, roles must be valid
+	// Message structural checks: roles must be valid, content polymorphic (string OR [text+image_url])
 	for i, msg := range req.Messages {
 		idxStr := strconv.Itoa(i)
-		if msg.Role == "" || msg.Content == "" {
-			err := &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' and 'content' fields"}
+		if msg.Role == "" {
+			err := &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' field"}
 			logValidationFailure(req, err)
 			return err
 		}
@@ -87,8 +201,7 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 			logValidationFailure(req, err)
 			return err
 		}
-		if controlChars.MatchString(msg.Content) {
-			err := &ValidationError{Message: "messages[" + idxStr + "].content contains invalid control characters"}
+		if err := validateVisionContent(idxStr, msg.Content); err != nil {
 			logValidationFailure(req, err)
 			return err
 		}
@@ -263,6 +376,89 @@ func fmtFloat(f float64) string {
 
 func fmtInt(i int) string {
 	return fmt.Sprintf("%d", i)
+}
+
+func validateVisionContent(idxStr string, c VisionContent) *ValidationError {
+	if c.IsArray() {
+		parts := c.Parts()
+		if len(parts) == 0 {
+			return &ValidationError{Message: "messages[" + idxStr + "].content array must not be empty"}
+		}
+		if len(parts) > 10 {
+			return &ValidationError{Message: "messages[" + idxStr + "].content too many parts (max 10)"}
+		}
+		hasText := false
+		for j, p := range parts {
+			switch p.Type {
+			case "text":
+				if p.Text == nil || strings.TrimSpace(*p.Text) == "" {
+					return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].text must be non-empty", idxStr, j)}
+				}
+				if controlChars.MatchString(*p.Text) {
+					return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].text contains invalid control characters", idxStr, j)}
+				}
+				hasText = true
+			case "image_url":
+				if p.ImageURL == nil || strings.TrimSpace(p.ImageURL.URL) == "" {
+					return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url must be non-empty", idxStr, j)}
+				}
+				if p.ImageURL.Detail != nil {
+					d := strings.ToLower(strings.TrimSpace(*p.ImageURL.Detail))
+					if d != "auto" && d != "low" && d != "high" {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.detail must be auto|low|high", idxStr, j)}
+					}
+				}
+				u := strings.TrimSpace(p.ImageURL.URL)
+				if strings.HasPrefix(u, "data:") {
+					// data:image/<mime>;base64,<data>
+					if !strings.HasPrefix(u, "data:image/") {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url data URI must be image", idxStr, j)}
+					}
+					comma := strings.Index(u, ",")
+					if comma < 0 {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url invalid data URI", idxStr, j)}
+					}
+					meta := u[:comma]
+					if !strings.Contains(meta, ";base64") {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url data URI must be base64", idxStr, j)}
+					}
+					b64 := u[comma+1:]
+					// quick size check: decoded size approx 3/4 * len
+					est := (len(b64) * 3 / 4)
+					if est > ChatImageMaxBytes {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url exceeds %d bytes", idxStr, j, ChatImageMaxBytes)}
+					}
+					if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
+						if _, err2 := base64.RawStdEncoding.DecodeString(b64); err2 != nil {
+							return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url invalid base64", idxStr, j)}
+						}
+					}
+				} else {
+					parsed, err := url.ParseRequestURI(u)
+					if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url must be valid URL", idxStr, j)}
+					}
+					if parsed.Scheme != "https" && parsed.Scheme != "http" {
+						return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].image_url.url must be http(s)", idxStr, j)}
+					}
+				}
+			default:
+				return &ValidationError{Message: fmt.Sprintf("messages[%s].content[%d].type must be text|image_url", idxStr, j)}
+			}
+		}
+		if !hasText {
+			// allow image-only? require at least one text per OpenAI spec? we allow image-only for now
+		}
+		return nil
+	}
+	text := c.AsText()
+	if strings.TrimSpace(text) == "" {
+		return &ValidationError{Message: "messages[" + idxStr + "] must contain 'role' and 'content' fields"}
+	}
+	if controlChars.MatchString(text) {
+		return &ValidationError{Message: "messages[" + idxStr + "].content contains invalid control characters"}
+	}
+	return nil
 }
 
 var TrustedBaseURLs = []string{

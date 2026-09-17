@@ -174,6 +174,7 @@ func SetupAPI(r *gin.Engine) {
 		// verified.GET("")
 
 		// ─── BYOK Chat Status (shared polling) ───
+		verified.POST("/chat/upload", apiControllers.ChatUpload)
 		verified.GET("/chat/status/:uuid", byokControllers.ChatStatus)
 		// Fase 3: SSE streaming (polling fallback tetap)
 		verified.GET("/chat/stream/:uuid", apiControllers.ChatStream)

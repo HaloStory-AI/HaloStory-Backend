@@ -54,7 +54,9 @@ func HandleOpenAI(data types.ChatData, decryptedKey string, messages []byok.Mess
 
 	rawContent := ""
 	if len(openaiResp.Choices) > 0 {
-		rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+		if s, ok := openaiResp.Choices[0].Message.Content.(string); ok {
+			rawContent = strings.TrimSpace(s)
+		}
 	}
 
 	summary, memories := byok.ParseSummaryResponse(rawContent)
@@ -65,7 +67,9 @@ func HandleOpenAI(data types.ChatData, decryptedKey string, messages []byok.Mess
 		reqPayload.Temperature = &temp
 		openaiResp, statusCode, err = byok.CallOpenAI(httpClient, decryptedKey, baseURL, model, reqPayload, 60*time.Second, sumOpts)
 		if err == nil && len(openaiResp.Choices) > 0 {
-			rawContent = strings.TrimSpace(openaiResp.Choices[0].Message.Content)
+			if s, ok := openaiResp.Choices[0].Message.Content.(string); ok {
+				rawContent = strings.TrimSpace(s)
+			}
 			summary, memories = byok.ParseSummaryResponse(rawContent)
 		}
 	}

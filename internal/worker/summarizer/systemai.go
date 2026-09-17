@@ -21,7 +21,7 @@ func HandleSystemAI(data types.ChatData, messages []byok.Message, userID uint) (
 	}
 
 	prompt := byok.BuildSummarizationPrompt(messages, lang, data.ExistingMemories)
-	promptMessages := []byok.Message{{Role: "user", Content: prompt}}
+	promptMessages := []byok.Message{{Role: "user", Content: byok.NewTextContent(prompt)}}
 
 	isVip := false
 	var user models.User

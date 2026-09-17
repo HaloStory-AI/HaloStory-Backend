@@ -187,13 +187,21 @@ func HandleOpenAI(ctx context.Context, uuid string, data types.ChatData) (map[st
 		return nil, 0, types.NewWorkerError("OpenAI API error: nil response", statusCode)
 	}
 
-	if len(openaiResp.Choices) > 0 && openaiResp.Choices[0].Message.Content != "" {
-		content := openaiResp.Choices[0].Message.Content
-		content = byok.ProcessAIResponse(content)
-		parsed := byok.ParseBondTags(content)
-		openaiResp.Choices[0].Message.Content = parsed.CleanText
+	if len(openaiResp.Choices) > 0 {
+		var rawContent string
+		switch v := openaiResp.Choices[0].Message.Content.(type) {
+		case string:
+			rawContent = v
+		default:
+			b, _ := json.Marshal(v)
+			_ = json.Unmarshal(b, &rawContent)
+		}
+		if rawContent != "" {
+				content := byok.ProcessAIResponse(rawContent)
+			parsed := byok.ParseBondTags(content)
+			openaiResp.Choices[0].Message.Content = parsed.CleanText
 
-		if isTrusted {
+			if isTrusted {
 			var bot models.Bot
 			database.DB.Where("bot_id = ?", data.BotID).First(&bot)
 			var user models.User
@@ -216,12 +224,13 @@ func HandleOpenAI(ctx context.Context, uuid string, data types.ChatData) (map[st
 			respMap["relationship_label"] = bondResult.RelationshipLabel
 			respMap["bond_level"] = bondResult.BondLevel
 		} else {
-			respMap["bond_event"] = nil
+				respMap["bond_event"] = nil
 			respMap["bond_status"] = nil
 			respMap["relationship_label"] = nil
 			respMap["bond_level"] = nil
 		}
 		return respMap, 200, nil
+		}
 	}
 
 	b, _ := json.Marshal(openaiResp)

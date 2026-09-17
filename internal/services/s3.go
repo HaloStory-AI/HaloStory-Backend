@@ -125,5 +125,19 @@ func StatBackupObject(userID uint) (minio.ObjectInfo, error) {
 	return MinioClient.StatObject(context.Background(), S3Bucket, backupKey(userID), minio.StatObjectOptions{})
 }
 
+// ── Chat upload R2 helpers ──
+
+const ChatImageMaxBytes = 5 << 20 // 5 MB
+
+func S3Enabled() bool { return MinioClient != nil && S3Bucket != "" }
+
+func PutChatUploadObject(objectKey string, data []byte, contentType string) error {
+	if MinioClient == nil || S3Bucket == "" {
+		return fmt.Errorf("S3 client is not initialized")
+	}
+	_, err := MinioClient.PutObject(context.Background(), S3Bucket, objectKey, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{ContentType: contentType})
+	return err
+}
+
 // BackupObjectKey mengembalikan key R2 untuk user (dipakai controller untuk metadata).
 func BackupObjectKey(userID uint) string { return backupKey(userID) }

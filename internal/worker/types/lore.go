@@ -17,7 +17,7 @@ func LoreInjection(botID string, messages []byok.Message) string {
 	}
 	texts := make([]string, 0, len(messages))
 	for _, m := range messages {
-		texts = append(texts, m.Content)
+		texts = append(texts, m.Content.AsText())
 	}
 	matched := memory.Scan(texts, books)
 	if len(matched) == 0 {
@@ -34,13 +34,13 @@ func AppendLoreToMessages(messages []byok.Message, injection string) []byok.Mess
 	}
 	for i, m := range messages {
 		if m.Role == "system" {
-			messages[i].Content += injection
+			messages[i].Content = byok.NewTextContent(m.Content.AsText() + injection)
 			return messages
 		}
 	}
 	if len(messages) > 0 && messages[0].Role != "system" {
-		return append([]byok.Message{{Role: "system", Content: injection}}, messages...)
+		return append([]byok.Message{{Role: "system", Content: byok.NewTextContent(injection)}}, messages...)
 	}
 	// Empty messages or first is system already handled; fallback prepend
-	return append([]byok.Message{{Role: "system", Content: injection}}, messages...)
+	return append([]byok.Message{{Role: "system", Content: byok.NewTextContent(injection)}}, messages...)
 }

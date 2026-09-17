@@ -67,6 +67,13 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	// Fase 2: registry validate (non-blocking, log only)
 	_ = llm.Default.Validate(provider, model, nil)
 
+	// Sensei hybrid: block vision
+	for _, m := range req.Messages {
+		if m.Content.HasImage() && user.Role == "Sensei" {
+			c.JSON(http.StatusForbidden, gin.H{"message": "Sensei tidak dapat mengirim foto/sticker"})
+			return
+		}
+	}
 	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
 		Messages:          req.Messages,
 		APIKey:            req.APIKey,

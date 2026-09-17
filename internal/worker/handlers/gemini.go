@@ -250,10 +250,10 @@ func buildGeminiContents(messages []byok.Message, model string) ([]byok.GeminiCo
 	for _, msg := range messages {
 		if msg.Role == "system" {
 			if !supportsSystemInstruction {
-				systemText = msg.Content
+				systemText = msg.Content.AsText()
 			} else {
 				systemInstruct = &byok.GeminiContent{
-					Parts: []byok.GeminiPart{{Text: msg.Content}},
+					Parts: []byok.GeminiPart{{Text: msg.Content.AsText()}},
 				}
 			}
 			continue
@@ -262,7 +262,7 @@ func buildGeminiContents(messages []byok.Message, model string) ([]byok.GeminiCo
 		if msg.Role == "assistant" {
 			role = "model"
 		}
-		text := msg.Content
+		text := msg.Content.AsText()
 		if !supportsSystemInstruction && len(contents) == 0 && role == "user" && systemText != "" {
 			text = systemText + "\n\n" + text
 		}
