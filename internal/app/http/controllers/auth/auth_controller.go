@@ -148,8 +148,9 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 
 			// Buat user baru dengan default role 'Sensei'
 			user = models.User{
-				Name:  identity.Name,
-				Email: identity.Email,
+				Name:     identity.Name,
+				Username: services.GenerateUsername(database.DB, identity.Name),
+				Email:    identity.Email,
 				// Pake password random dulu, karena login google langsung
 				// Ntar bisa diganti di setting profile
 				// Tanpa input password lama ( Karena dianggap belum pernah set Password )
@@ -621,6 +622,7 @@ func Register(c *gin.Context) {
 	// Buat user baru (default role 'Sensei' seperti di Laravel)
 	user := models.User{
 		Name:     req.Name,
+		Username: services.GenerateUsername(database.DB, req.Name),
 		Email:    req.Email,
 		Password: string(hashedPassword),
 		Role:     "Sensei",

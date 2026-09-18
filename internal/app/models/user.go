@@ -8,6 +8,8 @@ import (
 type User struct {
 	ID              uint       `gorm:"primaryKey" json:"id"`
 	Name            string     `json:"name"`
+	Username        string     `gorm:"size:255;uniqueIndex" json:"username"`
+	Avatar          *string    `gorm:"size:255" json:"avatar"`
 	Persona         *string    `json:"persona"`
 	// Picture         string     `json:"picture"`
 	Email           string     `json:"email"`
