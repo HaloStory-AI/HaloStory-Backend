@@ -56,18 +56,22 @@ curl http://localhost:3000/api/ping  # harus pong
 
 ## 5. Generate SSL (Let's Encrypt)
 
-Opsi A — otomatis via nginx plugin (paling mudah):
+`halostory.conf` sekarang hanya `:80` — `nginx -t` pasti lolos tanpa cert. Biarkan `certbot --nginx` yang generate block `:443` + `ssl_certificate` otomatis.
+
+Opsi A — otomatis via nginx plugin (rekomendasi):
 
 ```bash
 sudo certbot --nginx -d backend-hsai.rafiq8k.my.id
-# pilih redirect (2) kalau ditanya — akan isi ssl_certificate otomatis
+# pilih redirect (2) kalau ditanya — certbot akan duplikasi server block jadi :443 + 301 redirect
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
-Opsi B — webroot (pakai `location /.well-known/acme-challenge/` di conf):
+Opsi B — webroot (tanpa plugin nginx):
 
 ```bash
 sudo mkdir -p /var/www/certbot
 sudo certbot certonly --webroot -w /var/www/certbot -d backend-hsai.rafiq8k.my.id
+# certbot TIDAK edit nginx — redirect 301 belum ada, tetap http proxy biasa
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -80,6 +84,14 @@ sudo certbot renew --dry-run
 Auto-renew via systemd timer: `systemctl list-timers | grep certbot`
 
 ## 6. Verifikasi
+
+Sebelum SSL (hanya :80):
+
+```bash
+curl -i http://backend-hsai.rafiq8k.my.id/api/ping  # harus {"message":"pong","status":"ok"} langsung
+```
+
+Sesudah `certbot --nginx` (opsi A, sudah ada :443 + redirect):
 
 ```bash
 curl -i http://backend-hsai.rafiq8k.my.id/api/ping       # harus 301 ke https
