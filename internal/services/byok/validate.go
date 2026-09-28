@@ -335,6 +335,11 @@ func SanitizeByokInput(req *BYOKRequest) *ValidationError {
 		}
 	}
 
+	// Global reasoning: paksa low jika enabled (hemat token/latensi)
+	if req.Reasoning != nil && req.Reasoning.Enabled {
+		req.Reasoning.Effort = "low"
+	}
+
 	return nil
 }
 

@@ -174,7 +174,19 @@ func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *
 	apiKey := PickRandomKey(keys)
 
 	reqPayload := buildOpenAIRequest(messages, entry)
-	openaiResp, code, err := byok.CallOpenAI(httpClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, nil)
+	var openAIOpts *byok.OpenAIRequestOptions
+	if params.ReasoningEnabled {
+		effort := params.ReasoningEffort
+		if effort == "" {
+			effort = "low"
+		}
+		openAIOpts = &byok.OpenAIRequestOptions{
+			ExtraBody: map[string]interface{}{
+				"reasoning": map[string]interface{}{"effort": effort},
+			},
+		}
+	}
+	openaiResp, code, err := byok.CallOpenAI(httpClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, RequestTimeout, openAIOpts)
 	if err != nil {
 		pings = append(pings, PingLog{
 			Provider: entry.Provider,
@@ -271,7 +283,19 @@ func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params
 		}
 		return nil
 	}
-	openaiResp, code, err := byok.CallOpenAIStream(ctx, streamClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, nil, filteredDelta)
+	var streamOpts *byok.OpenAIRequestOptions
+	if params.ReasoningEnabled {
+		effort := params.ReasoningEffort
+		if effort == "" {
+			effort = "low"
+		}
+		streamOpts = &byok.OpenAIRequestOptions{
+			ExtraBody: map[string]interface{}{
+				"reasoning": map[string]interface{}{"effort": effort},
+			},
+		}
+	}
+	openaiResp, code, err := byok.CallOpenAIStream(ctx, streamClient, apiKey, entry.Config.BaseURL, entry.Model, reqPayload, streamOpts, filteredDelta)
 	if err != nil {
 		pings = append(pings, PingLog{
 			Provider: entry.Provider,

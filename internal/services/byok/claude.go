@@ -344,10 +344,8 @@ func BuildClaudePayload(messages []Message, model string, data map[string]interf
 
 	if reasoning, ok := data["reasoning"].(map[string]interface{}); ok {
 		if enabled, _ := reasoning["enabled"].(bool); enabled {
+			// Global low — paksa budget 1024 (minimal, hemat token)
 			budget := 1024
-			if b, ok := reasoning["budget"].(float64); ok && int(b) > 1024 {
-				budget = int(b)
-			}
 			payload.Thinking = &ClaudeThinkingConfig{
 				Type:         "enabled",
 				BudgetTokens: budget,
