@@ -58,9 +58,13 @@ func SystemChat(c *gin.Context) {
 		return
 	}
 
-	// Global low — system selalu reasoning low (hemat token/latensi).
-	// Abaikan preferensi client; reasoning_enabled true/false tetap dipaksa low.
-	_ = req.ReasoningEnabled
+	if req.ReasoningEnabled != nil && *req.ReasoningEnabled {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Validation failed",
+			"message": "Reasoning is not supported for system AI chat",
+		})
+		return
+	}
 
 	if len(req.Messages) == 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -148,8 +152,6 @@ func SystemChat(c *gin.Context) {
 	if len(req.Stop) > 0 {
 		payload["stop"] = req.Stop
 	}
-	// Global low — system selalu reasoning low, abaikan input client.
-	payload["reasoning"] = map[string]interface{}{"enabled": true, "effort": "low"}
 	// Stream flag: nil/absen = false (pengguna lama tetap polling).
 	if req.Stream != nil && *req.Stream {
 		payload["is_stream"] = true

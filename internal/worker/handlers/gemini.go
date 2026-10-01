@@ -86,12 +86,28 @@ func HandleGemini(ctx context.Context, uuid string, data types.ChatData) (map[st
 	}
 
 	if data.Reasoning != nil && data.Reasoning.Enabled {
-		// Global low — paksa 0.2*maxTokens (budget minimal, hemat latensi)
+		effort := data.Reasoning.Effort
+		if effort == "" {
+			effort = "low"
+		}
 		maxOutTokens := int(data.MaxTokens)
 		if maxOutTokens == 0 {
 			maxOutTokens = 2048
 		}
-		thinkingBudget := int(float64(maxOutTokens) * 0.2)
+		var thinkingBudget int
+		switch effort {
+		case "high":
+			thinkingBudget = int(float64(maxOutTokens) * 0.8)
+		case "medium":
+			thinkingBudget = int(float64(maxOutTokens) * 0.5)
+		case "custom":
+			thinkingBudget = int(data.Reasoning.MaxTokens)
+			if thinkingBudget == 0 {
+				thinkingBudget = 1024
+			}
+		default:
+			thinkingBudget = int(float64(maxOutTokens) * 0.2)
+		}
 		includeThoughts := !data.Reasoning.Exclude
 		genConfig.ThinkingConfig = &byok.ThinkingConfig{
 			IncludeThoughts: &includeThoughts,

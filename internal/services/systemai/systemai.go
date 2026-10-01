@@ -109,8 +109,6 @@ type SystemAIChatParams struct {
 	FrequencyPenalty  float64
 	MinP              float64
 	RepetitionPenalty float64
-	ReasoningEnabled bool
-	ReasoningEffort  string
 }
 
 type PingLog struct {

@@ -139,15 +139,6 @@ func HandleOpenAI(ctx context.Context, uuid string, data types.ChatData) (map[st
 			openAIOpts.ExtraBody["repetition_penalty"] = data.PresencePenalty
 		}
 	}
-	// Global low — selalu kirim reasoning effort low untuk semua OpenAI-compatible BYOK,
-	// tanpa peduli client kirim reasoning.enabled true/false/nil.
-	if openAIOpts == nil {
-		openAIOpts = &byok.OpenAIRequestOptions{ExtraBody: map[string]interface{}{}}
-	}
-	if openAIOpts.ExtraBody == nil {
-		openAIOpts.ExtraBody = map[string]interface{}{}
-	}
-	openAIOpts.ExtraBody["reasoning"] = map[string]interface{}{"effort": "low"}
 
 	httpClient := utils.NewAIHttpClient()
 	var openaiResp *byok.OpenAICompatResponse
