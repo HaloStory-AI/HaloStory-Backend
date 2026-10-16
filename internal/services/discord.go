@@ -57,19 +57,6 @@ func sendDiscord(payload discordPayload) {
 	}
 }
 
-func SendStudentRequest(userName, studentName string) {
-	sendDiscord(discordPayload{
-		Content: "Character Request",
-		Embeds: []discordEmbed{
-			{
-				Author:      discordAuthor{Name: "User = " + userName},
-				Title:       "Request",
-				Description: fmt.Sprintf("Hei... Someone request a Character name: %s By: %s\nRequested at: %s", studentName, userName, time.Now().Format("2006-01-02 15:04:05")),
-			},
-		},
-	})
-}
-
 func SendRequestApproved(userName, studentName string) {
 	sendDiscord(discordPayload{
 		Content: "Character Request Approved @everyone",

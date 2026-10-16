@@ -45,7 +45,6 @@
     <a href="/admin/bots" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-robot w-5 text-center"></i>Karakter</a>
     <a href="/admin/categories" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-tags w-5 text-center"></i>Kategori</a>
     <a href="/admin/users" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-users w-5 text-center"></i>Pengguna</a>
-    <a href="/admin/requests" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-envelope w-5 text-center"></i>Request Murid</a>
     <a href="/admin/settings" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-gear w-5 text-center"></i>Pengaturan</a>
     <a href="/admin/byok" class="sidebar-nav flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5 transition-all border-l-2 border-transparent"><i class="fa-solid fa-key w-5 text-center"></i>BYOK Tester</a>
     <hr class="border-white/10 my-2">
@@ -115,12 +114,12 @@ function showPage(page) {
   document.querySelectorAll('.sidebar-nav').forEach(a => {
     a.classList.toggle('active', a.getAttribute('href') === '/admin/' + page);
   });
-  const titles = { dashboard:'Dashboard', bots:'Karakter', categories:'Kategori', users:'Pengguna', requests:'Request Murid', settings:'Pengaturan', byok:'BYOK Tester' };
+  const titles = { dashboard:'Dashboard', bots:'Karakter', categories:'Kategori', users:'Pengguna', settings:'Pengaturan', byok:'BYOK Tester' };
   document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
   document.getElementById('userBadge').innerHTML = ADMIN_USER.name ? '<i class="fa-regular fa-circle-user mr-1"></i>' + ADMIN_USER.name : '';
 
   if (!requireAuth() && page !== 'login') return;
-  const loaders = { dashboard:loadDashboard, bots:loadBots, categories:loadCategories, users:loadUsers, requests:loadRequests, settings:loadSettings, byok:loadBYOK };
+  const loaders = { dashboard:loadDashboard, bots:loadBots, categories:loadCategories, users:loadUsers, settings:loadSettings, byok:loadBYOK };
   if (loaders[page]) loaders[page]();
 }
 
@@ -573,34 +572,6 @@ async function deleteUser(id) {
   if (!confirm('Hapus user ini?')) return;
   const res = await api('/api/admin/users/'+id, { method:'DELETE' });
   if (res && res.status < 400) { toast('User dihapus'); loadUsers(); }
-  else toast('Gagal', 'error');
-}
-
-// ─── Student Requests ───
-async function loadRequests() {
-  const el = document.getElementById('pageContent');
-  el.innerHTML = '<div class="text-center py-12 text-gray-500"><i class="fa-solid fa-spinner fa-spin text-2xl"></i><p class="mt-2">Memuat data...</p></div>';
-  const res = await api('/api/admin/student-requests');
-  if (!res) return;
-  const reqs = res.data || [];
-  let html = `<div class="card rounded-xl overflow-hidden"><table><thead><tr><th>Nama</th><th>User</th><th>Status</th><th>Tanggal</th><th>Aksi</th></tr></thead><tbody>`;
-  reqs.forEach(r => {
-    const statusColors = { pending:'bg-amber-600/20 text-amber-400', approved:'bg-green-600/20 text-green-400', rejected:'bg-red-600/20 text-red-400' };
-    html += `<tr><td class="text-sm font-medium">${r.student_name||r.studentName}</td><td class="text-sm text-gray-400">${r.user?.name||r.email||'—'}</td><td><span class="badge ${statusColors[r.status]||'bg-gray-600/20 text-gray-400'}">${r.status}</span></td><td class="text-sm text-gray-400">${new Date(r.created_at).toLocaleDateString()}</td><td class="text-sm whitespace-nowrap" id="req-actions-${r.id}">`;
-    if (r.status === 'pending') {
-      html += `<button onclick="updateRequest(${r.id},'approved')" class="btn-sm bg-green-600/20 text-green-400 hover:bg-green-600/30 mr-1"><i class="fa-solid fa-check mr-0.5"></i>Acc</button><button onclick="updateRequest(${r.id},'silent_approved')" class="btn-sm bg-white/10 text-gray-300 hover:bg-white/20 mr-1">Silent</button><button onclick="updateRequest(${r.id},'rejected')" class="btn-sm bg-red-600/20 text-red-400 hover:bg-red-600/30"><i class="fa-solid fa-xmark mr-0.5"></i>Tolak</button>`;
-    } else {
-      html += `<span class="text-gray-500 text-xs">Processed</span>`;
-    }
-    html += `</td></tr>`;
-  });
-  html += `</tbody></table></div>`;
-  el.innerHTML = html;
-}
-
-async function updateRequest(id, status) {
-  const res = await api('/api/admin/student-requests/'+id+'/status', { method:'PUT', body:JSON.stringify({ status }) });
-  if (res && res.status < 400) { toast('Status diupdate'); loadRequests(); }
   else toast('Gagal', 'error');
 }
 

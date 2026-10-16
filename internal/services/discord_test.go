@@ -11,31 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDiscord_SendStudentRequest(t *testing.T) {
-	var receivedPayload discordPayload
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		err := json.NewDecoder(r.Body).Decode(&receivedPayload)
-		require.NoError(t, err)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	os.Setenv("DISCORD_WEBHOOK_URL", server.URL)
-	defer os.Unsetenv("DISCORD_WEBHOOK_URL")
-
-	// Reset the HTTP client to avoid caching
-	discordHTTPClient = &http.Client{}
-
-	SendStudentRequest("TestUser", "TestCharacter")
-
-	assert.Equal(t, "Character Request", receivedPayload.Content)
-	require.Len(t, receivedPayload.Embeds, 1)
-	assert.Equal(t, "User = TestUser", receivedPayload.Embeds[0].Author.Name)
-	assert.Contains(t, receivedPayload.Embeds[0].Description, "TestCharacter")
-	assert.Contains(t, receivedPayload.Embeds[0].Description, "TestUser")
-}
-
 func TestDiscord_SendRequestApproved(t *testing.T) {
 	var receivedPayload discordPayload
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +61,6 @@ func TestDiscord_EmptyURL(t *testing.T) {
 	discordHTTPClient = &http.Client{}
 
 	// Should not panic or error
-	SendStudentRequest("TestUser", "TestCharacter")
 	SendRequestApproved("TestUser", "TestCharacter")
 	SendRequestRejected("TestUser", "TestCharacter")
 }

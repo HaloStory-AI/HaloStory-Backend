@@ -113,14 +113,23 @@ func ChatStream(c *gin.Context) {
 			_, _ = fmt.Fprint(c.Writer, ": ping\n\n")
 			c.Writer.Flush()
 		case <-watchdog.C:
-			// Redis mati di tengah stream → cek hasil via fallback
+			// Watchdog: Redis mati di tengah stream atau worker lambat →
+			// cek hasil via DB fallback agar klien tidak menunggu selamanya.
 			if data, ok := fetchCompletedResult(uuid); ok {
 				sendDone(c, data)
 				return
 			}
 		case delta, ok := <-ch:
 			if !ok {
-				return
+				// Channel ditutup (Redis mati mid-stream atau ctx selesai).
+				// Coba baca hasil akhir dari DB fallback sebelum menyerah.
+				if data, ok := fetchCompletedResult(uuid); ok {
+					sendDone(c, data)
+					return
+				}
+				// Belum selesai — lanjut polling via watchdog sampai ctx selesai.
+				ch = nil // set nil agar select tidak spin pada closed channel
+				continue
 			}
 			if delta == "[DONE]" {
 				// fetch final result (dengan retry: DONE dipublish sebelum write)

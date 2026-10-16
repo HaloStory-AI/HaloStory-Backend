@@ -48,7 +48,6 @@ func Dequeue(queueName string, timeout time.Duration) (string, []byte, error) {
 
 func StoreChatResult(uuid string, result []byte, ttl time.Duration) error {
 	key := fmt.Sprintf("chat:%s", uuid)
-	// return RedisClient.SetEx(RedisCtx, key, string(result), ttl).Err()
 	return RedisClient.Set(RedisCtx, key, string(result), ttl).Err()
 }
 
@@ -62,7 +61,6 @@ func DeleteChatResult(uuid string) error {
 	return RedisClient.Del(RedisCtx, key).Err()
 }
 
-// redis.call('SETEX', KEYS[1], ARGV[4], cjson.encode(payload))
 const updateStatusScript = `
 local data = redis.call('GET', KEYS[1])
 if not data then return nil end
@@ -97,9 +95,19 @@ func MarkChatCompleted(uuid string, response json.RawMessage, statusCode int) er
 	return err
 }
 
+// ─── Cooldown & Pending: Redis first, in-memory fallback ───
+// Saat Redis down, cooldown dan pending queue dilayani oleh memCooldown dan
+// memPending (lihat mem_store.go). Data bersifat per-proses; multi-instance
+// tanpa Redis tidak berbagi state cooldown — cukup untuk single-VPS.
+
 func SetCooldown(userID uint, ttl time.Duration) error {
 	key := fmt.Sprintf("ai-chat-cooldown:%d", userID)
-	return RedisClient.SetEx(RedisCtx, key, "1", ttl).Err()
+	if err := RedisClient.SetEx(RedisCtx, key, "1", ttl).Err(); err != nil {
+		log.Printf("SetCooldown: Redis error, using in-memory fallback: %v", err)
+		memCooldown.Set(key, ttl)
+		return nil
+	}
+	return nil
 }
 
 func CheckCooldown(userID uint) (bool, error) {
@@ -109,22 +117,41 @@ func CheckCooldown(userID uint) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		// Redis down → cek in-memory
+		return memCooldown.Has(key), nil
 	}
 	return true, nil
 }
 
 func PushPending(userID uint, uuid string) error {
 	key := fmt.Sprintf("ai-chat-pending:%d", userID)
-	return RedisClient.RPush(RedisCtx, key, uuid).Err()
+	if err := RedisClient.RPush(RedisCtx, key, uuid).Err(); err != nil {
+		log.Printf("PushPending: Redis error, using in-memory fallback: %v", err)
+		memPending.Push(key, uuid)
+		return nil
+	}
+	return nil
 }
 
 func PopPending(userID uint) (string, error) {
 	key := fmt.Sprintf("ai-chat-pending:%d", userID)
-	return RedisClient.LPop(RedisCtx, key).Result()
+	val, err := RedisClient.LPop(RedisCtx, key).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		// Redis down → cek in-memory
+		return memPending.Pop(key), nil
+	}
+	return val, nil
 }
 
-// ─── Fase 3: Streaming SSE via Redis Pub/Sub + buffer ───
+// ─── Streaming SSE: Redis Pub/Sub + buffer, fallback in-process ───
+// Saat Redis sehat: delta dikirim via PUBLISH + di-buffer di List Redis.
+// Saat Redis down: delta dikirim lewat memStream (in-process channel store).
+// Single-instance: SSE tetap berfungsi penuh tanpa Redis.
+// Multi-instance: delta tidak diteruskan antar proses; klien mendapat hasil
+// akhir via polling watchdog (watchdog 5 dtk di stream_controller).
 
 type StreamChunk struct {
 	UUID         string  `json:"uuid"`
@@ -148,58 +175,72 @@ func PublishStream(uuid string, delta string) error {
 	if delta == "" {
 		return nil
 	}
-	// PUBLISH for live subscribers
-	_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), delta).Err()
-	// Buffer for replay (LPUSH + LTRIM + EXPIRE)
-	pipe := RedisClient.Pipeline()
-	pipe.LPush(RedisCtx, streamBufKey(uuid), delta)
-	pipe.LTrim(RedisCtx, streamBufKey(uuid), 0, streamBufMax-1)
-	pipe.Expire(RedisCtx, streamBufKey(uuid), streamBufTTL)
-	_, _ = pipe.Exec(RedisCtx)
+	if IsRedisUp() {
+		// PUBLISH untuk live subscriber + buffer untuk replay
+		_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), delta).Err()
+		pipe := RedisClient.Pipeline()
+		pipe.LPush(RedisCtx, streamBufKey(uuid), delta)
+		pipe.LTrim(RedisCtx, streamBufKey(uuid), 0, streamBufMax-1)
+		pipe.Expire(RedisCtx, streamBufKey(uuid), streamBufTTL)
+		_, _ = pipe.Exec(RedisCtx)
+		return nil
+	}
+	// Redis down → in-process pub/sub
+	memStream.Publish(uuid, delta)
 	return nil
 }
 
 func PublishStreamDone(uuid string) error {
-	_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), "[DONE]").Err()
+	if IsRedisUp() {
+		_ = RedisClient.Publish(RedisCtx, streamChannel(uuid), "[DONE]").Err()
+		return nil
+	}
+	memStream.Publish(uuid, "[DONE]")
 	return nil
 }
 
 func GetStreamBuffer(uuid string) []string {
-	vals, err := RedisClient.LRange(RedisCtx, streamBufKey(uuid), 0, -1).Result()
-	if err != nil {
-		return nil
+	if IsRedisUp() {
+		vals, err := RedisClient.LRange(RedisCtx, streamBufKey(uuid), 0, -1).Result()
+		if err != nil {
+			return nil
+		}
+		// LPUSH stores newest first, reverse to chronological
+		for i, j := 0, len(vals)-1; i < j; i, j = i+1, j-1 {
+			vals[i], vals[j] = vals[j], vals[i]
+		}
+		return vals
 	}
-	// LPUSH stores newest first, reverse to chronological
-	for i, j := 0, len(vals)-1; i < j; i, j = i+1, j-1 {
-		vals[i], vals[j] = vals[j], vals[i]
-	}
-	return vals
+	return memStream.GetBuffer(uuid)
 }
 
 func SubscribeStream(ctx context.Context, uuid string) <-chan string {
 	ch := make(chan string, 100)
-	pubsub := RedisClient.Subscribe(ctx, streamChannel(uuid))
-	go func() {
-		defer close(ch)
-		defer pubsub.Close()
-		// Ensure subscription is ready
-		_, _ = pubsub.Receive(ctx)
-		msgCh := pubsub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-msgCh:
-				if !ok {
-					return
-				}
+	if IsRedisUp() {
+		pubsub := RedisClient.Subscribe(ctx, streamChannel(uuid))
+		go func() {
+			defer close(ch)
+			defer pubsub.Close()
+			_, _ = pubsub.Receive(ctx)
+			msgCh := pubsub.Channel()
+			for {
 				select {
-				case ch <- msg.Payload:
 				case <-ctx.Done():
 					return
+				case msg, ok := <-msgCh:
+					if !ok {
+						return
+					}
+					select {
+					case ch <- msg.Payload:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
-		}
-	}()
-	return ch
+		}()
+		return ch
+	}
+	// Redis down → in-process subscribe
+	return memStream.Subscribe(ctx, uuid, ch)
 }

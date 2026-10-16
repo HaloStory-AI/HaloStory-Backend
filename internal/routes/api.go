@@ -148,11 +148,6 @@ func SetupAPI(r *gin.Engine) {
 	protected.GET("/v1/bot-bio/:bot_id", apiControllers.ShowBio)
 	protected.GET("/v1/recruited-bots", apiControllers.RecruitedBotsIndex)
 
-	// Student Request Routes (no email verification required — same as Laravel)
-	protected.GET("/student-requests", apiControllers.StudentRequestIndex)
-	protected.POST("/student-requests", apiControllers.StudentRequestStore)
-	protected.POST("/student-request/check", apiControllers.StudentRequestCheck)
-
 	// Activity tracking (api_hit logging for protected routes)
 	protected.Use(middlewares.ActivityLogger())
 
@@ -226,9 +221,6 @@ func SetupAPI(r *gin.Engine) {
 		admin.POST("/bots/bulk-store", apiControllers.AdminBulkStoreBots)
 
 		admin.POST("/upload", apiControllers.AdminUploadFile)
-
-		admin.GET("/student-requests", apiControllers.AdminGetStudentRequests)
-		admin.PUT("/student-requests/:id/status", apiControllers.AdminUpdateStudentRequestStatus)
 
 		// Fase 4: Lorebook STAFF-BASED (admin only, per karakter)
 		admin.GET("/bots/:bot_id/lorebooks", adminControllers.ListLorebooks)
