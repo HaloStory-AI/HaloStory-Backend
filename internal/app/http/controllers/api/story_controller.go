@@ -21,25 +21,30 @@ type storyItem struct {
 	CreatedAt string  `json:"created_at"`
 }
 
+// GetByBondedBots melayani GET /v1/stories.
+// Bond system dihapus: tidak ada lagi filter bonded-bots. Mengembalikan
+// story 24 jam terakhir (rating "g") dari SEMUA bot dengan struktur
+// JSON yang sama seperti sebelumnya agar frontend tidak crash.
 func GetByBondedBots(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
+	var stories []models.CharacterStory
+	database.DB.Where("rating = ? AND created_at >= ?",
+		"g", time.Now().Add(-24*time.Hour)).
+		Order("bot_id asc, created_at desc").
+		Find(&stories)
 
-	var botIDs []string
-	database.DB.Model(&models.UserBotBond{}).
-		Where("user_id = ?", user.ID).
-		Pluck("bot_id", &botIDs)
-
-	if len(botIDs) == 0 {
+	if len(stories) == 0 {
 		c.JSON(http.StatusOK, []storyItem{})
 		return
 	}
 
-	var stories []models.CharacterStory
-	database.DB.Where("bot_id IN ? AND rating = ? AND created_at >= ?",
-		botIDs, "g", time.Now().Add(-24*time.Hour)).
-		Order("bot_id asc, created_at desc").
-		Find(&stories)
+	botIDs := make([]string, 0, len(stories))
+	seen := make(map[string]bool)
+	for _, s := range stories {
+		if !seen[s.BotID] {
+			seen[s.BotID] = true
+			botIDs = append(botIDs, s.BotID)
+		}
+	}
 
 	type botAvatarRow struct {
 		BotID  string

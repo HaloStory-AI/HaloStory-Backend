@@ -83,11 +83,8 @@ func SetupAPI(r *gin.Engine) {
 	api.POST("/forgot-password", auth.ForgotPassword)
 	api.POST("/reset-password", auth.ResetPassword)
 
-	// Protected routes tanpa banned middleware (biar banned user bisa report device)
-	api.POST("/user/report-banned-device", middlewares.Protected(), auth.ReportBannedDevice)
-
-	// Protected routes (membutuhkan JWT dan tidak dibanned)
-	protected := api.Group("/", middlewares.Protected(), middlewares.CheckBanned())
+	// Protected routes (membutuhkan JWT)
+	protected := api.Group("/", middlewares.Protected())
 
 	protected.GET("/user", func(c *gin.Context) {
 		// Ambil data user dari context yang diset oleh middleware
@@ -129,11 +126,8 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/user/update-password", auth.UpdatePassword)
 	protected.POST("/user/update-persona", auth.UpdatePersona)
 
-	// Bond Routes (no email verification required — same as Laravel)
-	protected.POST("/bots/recruit", apiControllers.BondRecruit)
-	protected.GET("/bots/bond/:bot_id", apiControllers.BondShow)
-	protected.POST("/bots/bond/:bot_id/choice", apiControllers.BondHandleChoice)
-	protected.POST("/bots/bond/:bot_id/debug", apiControllers.BondDebugUpdate)
+	// Bond System dihapus total (tidak ada lagi recruit/XP/level/relationship).
+	// Tabel bond lama dibiarkan di DB (tidak dipakai lagi).
 
 	// Stories & Calendar Routes (no email verification required — same as Laravel)
 	protected.GET("/v1/stories", apiControllers.GetByBondedBots)
@@ -194,8 +188,6 @@ func SetupAPI(r *gin.Engine) {
 		admin.GET("/users", apiControllers.AdminGetUsers)
 		admin.PUT("/users/:id/role", apiControllers.AdminChangeUserRole)
 		admin.POST("/users/:id/make-vip", apiControllers.AdminMakeVip)
-		admin.POST("/users/:id/ban", apiControllers.AdminBanUser)
-		admin.POST("/users/:id/unban", apiControllers.AdminUnbanUser)
 		admin.DELETE("/users/:id", apiControllers.AdminDeleteUser)
 
 		admin.GET("/activities", apiControllers.AdminGetActivities)

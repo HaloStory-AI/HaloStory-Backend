@@ -71,7 +71,7 @@ func UserPersonaPtr(s string) *string {
 }
 
 // PreparePromptMessages applies lore injection, system prompt injection, and group context
-// in a single reusable pipeline. isTrusted controls bond inclusion (BYOK openai-compatible).
+// in a single reusable pipeline.
 func PreparePromptMessages(
 	messages []byok.Message,
 	botID string,
@@ -80,10 +80,8 @@ func PreparePromptMessages(
 	contextLimit *int,
 	summary *string,
 	userID uint,
-	isDisableBond bool,
 	userPersona *string,
 	model string,
-	isTrusted bool,
 	loreInjection string,
 	botIDs []string,
 	isGroup bool,
@@ -92,10 +90,10 @@ func PreparePromptMessages(
 	if userID == 0 {
 		uidPtr = nil
 	}
-	messages = byok.InjectByokSystemPromptWithModelTrusted(
+	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
-		summary, uidPtr, isDisableBond, userPersona,
-		model, isTrusted,
+		summary, uidPtr, userPersona,
+		model,
 	)
 	// Append lore after system prompt injection
 	if loreInjection != "" {

@@ -99,17 +99,6 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 		return
 	}
 
-	// Cek apakah device_id dibanned
-	if authRequest.DeviceID != "" {
-		var deviceBan models.DeviceBan
-		if err := database.DB.Where("device_id = ?", authRequest.DeviceID).First(&deviceBan).Error; err == nil {
-			c.JSON(http.StatusForbidden, gin.H{
-				"message": "Perangkat ini telah dibanned. Tidak dapat mendaftar.",
-			})
-			return
-		}
-	}
-
 	if authType == LINK {
 		userVal, _ := c.Get("user")
 		user := userVal.(models.User)
@@ -228,22 +217,6 @@ func AuthorizationCode(c *gin.Context, authType AUTHTYPE) {
 		}
 	}
 
-	// Cek apakah user sedang dibanned
-	if user.HasActiveBan() {
-		var bannedUntilStr *string
-		if user.BannedUntil != nil {
-			str := user.BannedUntil.Format("2006-01-02T15:04:05Z07:00") // Format RFC3339
-			bannedUntilStr = &str
-		}
-
-		c.JSON(http.StatusForbidden, gin.H{
-			"message":      "Akun Anda telah dibanned.",
-			"reason":       user.BanReason,
-			"banned_until": bannedUntilStr,
-		})
-		return
-	}
-
 	tokenString, refreshToken, err := issueTokens(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -320,13 +293,6 @@ func Refresh(c *gin.Context) {
 	if err := database.DB.First(&user, rt.UserID).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message": "User tidak ditemukan",
-		})
-		return
-	}
-
-	if user.HasActiveBan() {
-		c.JSON(http.StatusForbidden, gin.H{
-			"message": "Akun Anda telah dibanned.",
 		})
 		return
 	}
@@ -426,22 +392,6 @@ func Login(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"message": "Email atau password salah",
-		})
-		return
-	}
-
-	// Cek apakah user sedang dibanned
-	if user.HasActiveBan() {
-		var bannedUntilStr *string
-		if user.BannedUntil != nil {
-			str := user.BannedUntil.Format("2006-01-02T15:04:05Z07:00") // Format RFC3339
-			bannedUntilStr = &str
-		}
-
-		c.JSON(http.StatusForbidden, gin.H{
-			"message":      "Akun Anda telah dibanned.",
-			"reason":       user.BanReason,
-			"banned_until": bannedUntilStr,
 		})
 		return
 	}
@@ -562,17 +512,6 @@ func Register(c *gin.Context) {
 			},
 		})
 		return
-	}
-
-	// Cek apakah device_id dibanned
-	if req.DeviceID != "" {
-		var deviceBan models.DeviceBan
-		if err := database.DB.Where("device_id = ?", req.DeviceID).First(&deviceBan).Error; err == nil {
-			c.JSON(http.StatusForbidden, gin.H{
-				"message": "Perangkat ini telah dibanned. Tidak dapat mendaftar.",
-			})
-			return
-		}
 	}
 
 	// Cek apakah domain email adalah temporary/fake domain

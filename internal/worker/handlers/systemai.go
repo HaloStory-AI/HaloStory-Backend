@@ -76,7 +76,6 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 		IsSummarize:    false,
 		HistoryDepth:   historyDepth,
 		IsGroup:        data.IsGroup,
-		IsDisableBond:  data.IsDisableBond,
 		UserPersona:    data.UserPersona,
 		BotIDs:         data.BotIDs,
 	}
@@ -101,7 +100,7 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 	}
 	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
-		summaryPtr, &userID, data.IsDisableBond, userPersonaPtr,
+		summaryPtr, &userID, userPersonaPtr,
 		sysModel,
 	)
 	if loreInjection != "" {
@@ -150,29 +149,6 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 
 	// Update response content with clean text
 	updateResponseContent(result.Response, parsed.CleanText)
-
-	var bot models.Bot
-	database.DB.Where("bot_id = ?", data.BotID).First(&bot)
-
-	bondEvent := ""
-	bondStatus := ""
-	relationshipLabel := ""
-	bondLevel := 0
-	if !data.IsGroup && !data.IsDisableBond && bot.BotID != "" {
-		bondResult := byok.AddBondXp(data.BotID, parsed, userID)
-		bondEvent = bondResult.BondEvent
-		bondStatus = bondResult.BondStatus
-		relationshipLabel = bondResult.RelationshipLabel
-		bondLevel = bondResult.BondLevel
-	}
-
-	// Attach bond fields to response
-	if bondEvent != "" || bondStatus != "" || bondLevel > 0 {
-		result.Response["bond_event"] = bondEvent
-		result.Response["bond_status"] = bondStatus
-		result.Response["relationship_label"] = relationshipLabel
-		result.Response["bond_level"] = bondLevel
-	}
 
 	return result.Response, 200, nil, userID
 }

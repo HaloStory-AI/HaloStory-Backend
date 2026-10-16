@@ -46,7 +46,7 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 	}
 
 	loreInjection := types.LoreInjection(botID, messages)
-	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userID, data.IsDisableBond, userPersona, data.Model, true, loreInjection, data.BotIDs, data.IsGroup)
+	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userID, userPersona, data.Model, loreInjection, data.BotIDs, data.IsGroup)
 
 	payloadMap := map[string]interface{}{
 		"model":             data.Model,
@@ -62,7 +62,6 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 		"language":          data.Language,
 		"history_depth":     data.HistoryDepth,
 		"is_group":          data.IsGroup,
-		"isdisablebond":     data.IsDisableBond,
 		"user_persona":      data.UserPersona,
 		"bot_ids":           data.BotIDs,
 		"existing_memories": data.ExistingMemories,
@@ -133,20 +132,6 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 			msg["content"] = parsed.CleanText
 			choices[0]["message"] = msg
 			openaiFormat["choices"] = choices
-		}
-
-
-		if !data.IsGroup && !data.IsDisableBond {
-			bondResult := byok.AddBondXp(data.BotID, parsed, userID)
-			openaiFormat["bond_event"] = bondResult.BondEvent
-			openaiFormat["bond_status"] = bondResult.BondStatus
-			openaiFormat["relationship_label"] = bondResult.RelationshipLabel
-			openaiFormat["bond_level"] = bondResult.BondLevel
-		} else {
-			openaiFormat["bond_event"] = nil
-			openaiFormat["bond_status"] = nil
-			openaiFormat["relationship_label"] = nil
-			openaiFormat["bond_level"] = nil
 		}
 	}
 

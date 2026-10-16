@@ -39,7 +39,6 @@ type OpenAIProviderRequest struct {
 	Language          *string                 `json:"language,omitempty"`
 	HistoryDepth      *int                    `json:"history_depth,omitempty"`
 	IsGroup           *bool                   `json:"is_group,omitempty"`
-	IsDisableBond     *bool                   `json:"isdisablebond,omitempty"`
 	UserPersona       *string                 `json:"user_persona,omitempty"`
 	BotIDs            []string                `json:"bot_ids,omitempty"`
 	BotID             *string                 `json:"bot_id,omitempty"`
@@ -94,7 +93,6 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		Language:          req.Language,
 		HistoryDepth:      req.HistoryDepth,
 		IsGroup:           req.IsGroup,
-		IsDisableBond:     req.IsDisableBond,
 		UserPersona:       req.UserPersona,
 		BotIDs:            req.BotIDs,
 		ExistingMemories:  req.ExistingMemories,
@@ -204,9 +202,6 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
-	}
-	if req.IsDisableBond != nil {
-		payload["isdisablebond"] = *req.IsDisableBond
 	}
 	if req.UserPersona != nil {
 		payload["user_persona"] = *req.UserPersona

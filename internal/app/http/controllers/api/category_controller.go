@@ -72,30 +72,14 @@ func CategoryIndex(c *gin.Context) {
 func CategoryBots(c *gin.Context) {
 	slug := c.Param("slug")
 
-	userVal, exists := c.Get("user")
-	var bonds []models.UserBotBond
-	if exists && userVal != nil {
-		user := userVal.(models.User)
-		database.DB.Where("user_id = ?", user.ID).Find(&bonds)
-	}
-
 	var bots []models.Bot
 	database.DB.Where("category_slug = ?", slug).Order("name asc").Select("bot_id, name, description, avatar, birthday, sbr, color, child").Find(&bots)
 
-	bondMap := make(map[string]models.UserBotBond)
-	for _, b := range bonds {
-		bondMap[b.BotID] = b
-	}
-
 	var response []botItemResponse
 	for _, bot := range bots {
+		// Bond system dihapus: selalu 0 (field dipertahankan agar frontend tidak crash).
 		bondXp := 0
 		bondHearts := 0
-
-		if bond, exists := bondMap[bot.BotID]; exists {
-			bondXp = bond.Xp
-			bondHearts = bond.GetLevel()
-		}
 
 		sbr := ""
 		if bot.Sbr != nil {

@@ -28,7 +28,6 @@ type SystemChatRequest struct {
 	Summary          *string                  `json:"summary,omitempty"`
 	HistoryDepth     *int                     `json:"history_depth,omitempty"`
 	IsGroup          *bool                    `json:"is_group,omitempty"`
-	IsDisableBond    *bool                    `json:"isdisablebond,omitempty"`
 	UserPersona      *string                  `json:"user_persona,omitempty"`
 	BotIDs           []string                 `json:"bot_ids,omitempty"`
 	ExistingMemories []string                 `json:"existing_memories,omitempty"`
@@ -136,9 +135,6 @@ func SystemChat(c *gin.Context) {
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
-	}
-	if req.IsDisableBond != nil {
-		payload["isdisablebond"] = *req.IsDisableBond
 	}
 	if req.UserPersona != nil {
 		payload["user_persona"] = *req.UserPersona
@@ -348,7 +344,7 @@ func GetSystemPrompt(c *gin.Context) {
 
 	lang := "id"
 	langPtr := &lang
-	prompt := byokSvc.FormatGlobalPrompt(&botID, langPtr, nil, nil, nil, nil, true)
+	prompt := byokSvc.FormatGlobalPrompt(&botID, langPtr, nil, nil, nil)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":       "success",

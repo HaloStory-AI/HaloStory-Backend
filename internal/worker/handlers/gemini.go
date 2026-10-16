@@ -48,7 +48,7 @@ func HandleGemini(ctx context.Context, uuid string, data types.ChatData) (map[st
 	}
 
 	loreInjection := types.LoreInjection(botID, messages)
-	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userID, data.IsDisableBond, userPersona, data.Model, true, loreInjection, data.BotIDs, data.IsGroup)
+	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userID, userPersona, data.Model, loreInjection, data.BotIDs, data.IsGroup)
 
 	contents, systemInstruct, systemText := buildGeminiContents(messages, data.Model)
 
@@ -197,23 +197,10 @@ func HandleGemini(ctx context.Context, uuid string, data types.ChatData) (map[st
 		parsed := byok.ParseBondTags(content)
 		openaiResp.Choices[0].Message.Content = parsed.CleanText
 
-
 		respBytes, _ := json.Marshal(openaiResp)
 		var respMap map[string]interface{}
 		_ = json.Unmarshal(respBytes, &respMap)
 
-		if !data.IsGroup && !data.IsDisableBond && data.BotID != "" {
-			bondResult := byok.AddBondXp(data.BotID, parsed, userID)
-			respMap["bond_event"] = bondResult.BondEvent
-			respMap["bond_status"] = bondResult.BondStatus
-			respMap["relationship_label"] = bondResult.RelationshipLabel
-			respMap["bond_level"] = bondResult.BondLevel
-		} else {
-			respMap["bond_event"] = nil
-			respMap["bond_status"] = nil
-			respMap["relationship_label"] = nil
-			respMap["bond_level"] = nil
-		}
 		return respMap, 200, nil
 	}
 

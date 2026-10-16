@@ -20,21 +20,17 @@ type botTabItem struct {
 	Child      bool    `json:"child"`
 }
 
+// BotTabIndex melayani GET /v1/bot-tab.
+// Bond system dihapus: tidak ada lagi konsep recruit. Mengembalikan
+// SEMUA bot (bond_hearts selalu 0, field dipertahankan agar frontend
+// tidak crash) sehingga chat tetap bisa diakses tanpa gate recruit.
 func BotTabIndex(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
+	var bots []models.Bot
+	database.DB.Order("name asc").Select("bot_id, name, avatar, birthday, color, child").Find(&bots)
 
-	var bonds []models.UserBotBond
-	database.DB.Preload("Bot").Where("user_id = ?", user.ID).Find(&bonds)
+	response := make([]botTabItem, 0)
 
-	var response []botTabItem
-
-	for _, bond := range bonds {
-		bot := bond.Bot
-		if bot == nil {
-			continue
-		}
-
+	for _, bot := range bots {
 		avatar := ""
 		if bot.Avatar != nil {
 			avatar = *bot.Avatar
@@ -52,13 +48,9 @@ func BotTabIndex(c *gin.Context) {
 			ImageURL:   services.ImageURL(avatar),
 			Color:      bot.Color,
 			Birthday:   birthdayStr,
-			BondHearts: bond.GetLevel(),
+			BondHearts: 0,
 			Child:      bot.Child,
 		})
-	}
-
-	if response == nil {
-		response = make([]botTabItem, 0)
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -74,21 +66,16 @@ type recruitedBotItem struct {
 	Child       bool    `json:"child"`
 }
 
+// RecruitedBotsIndex melayani GET /v1/recruited-bots.
+// Bond system dihapus: mengembalikan SEMUA bot dengan struktur JSON
+// yang sama (list kosong hanya jika tidak ada bot sama sekali).
 func RecruitedBotsIndex(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
+	var bots []models.Bot
+	database.DB.Order("name asc").Select("bot_id, name, description, avatar, birthday, color, child").Find(&bots)
 
-	var bonds []models.UserBotBond
-	database.DB.Preload("Bot").Where("user_id = ?", user.ID).Find(&bonds)
+	response := make([]recruitedBotItem, 0)
 
-	var response []recruitedBotItem
-
-	for _, bond := range bonds {
-		bot := bond.Bot
-		if bot == nil {
-			continue
-		}
-
+	for _, bot := range bots {
 		color := "0xFF607D8B"
 		if bot.Color != nil {
 			color = *bot.Color
@@ -114,10 +101,6 @@ func RecruitedBotsIndex(c *gin.Context) {
 			Description: bot.Description,
 			Child:       bot.Child,
 		})
-	}
-
-	if response == nil {
-		response = make([]recruitedBotItem, 0)
 	}
 
 	c.JSON(http.StatusOK, response)

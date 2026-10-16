@@ -32,32 +32,16 @@ type botIndexItem struct {
 }
 
 // Index menampilkan seluruh bot
+// Bond system dihapus: bond_xp/bond_hearts selalu 0 (field dipertahankan
+// agar frontend tidak crash).
 func BotIndex(c *gin.Context) {
 	var bots []models.Bot
 	database.DB.Select("bot_id, name, description, avatar, jailbreak, personality, chat_examples, birthday, sbr, color, child").Find(&bots)
-
-	var bonds []models.UserBotBond
-	// Ambil dari context jika ada
-	userVal, exists := c.Get("user")
-	if exists && userVal != nil {
-		user := userVal.(models.User)
-		database.DB.Where("user_id = ?", user.ID).Find(&bonds)
-	}
-
-	bondMap := make(map[string]models.UserBotBond)
-	for _, b := range bonds {
-		bondMap[b.BotID] = b
-	}
 
 	var response []botIndexItem
 	for _, bot := range bots {
 		bondXp := 0
 		bondHearts := 0
-
-		if bond, exists := bondMap[bot.BotID]; exists {
-			bondXp = bond.Xp
-			bondHearts = bond.GetLevel()
-		}
 
 		sbr := ""
 		if bot.Sbr != nil {

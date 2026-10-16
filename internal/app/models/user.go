@@ -18,24 +18,10 @@ type User struct {
 	Role            string     `json:"role"`
 	VipStartedAt    *time.Time `json:"vip_started_at"`
 	VipExpiresAt    *time.Time `json:"vip_expires_at"`
-	IsBanned        bool       `json:"is_banned"`
-	BanReason       *string    `json:"ban_reason"`
-	BannedUntil     *time.Time `json:"banned_until"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-}
-
-// HasActiveBan mengecek apakah user sedang dibanned secara aktif.
-// Dinamakan HasActiveBan agar tidak bentrok dengan field IsBanned.
-func (u *User) HasActiveBan() bool {
-	if !u.IsBanned {
-		return false
-	}
-
-	// Jika ada batas waktu dan sudah lewat, berarti ban sudah selesai
-	if u.BannedUntil != nil && u.BannedUntil.Before(time.Now()) {
-		return false
-	}
-
-	return true
+	// Kolom ban dibiarkan di DB (tidak dipakai lagi, tidak ada gate yang menolak request).
+	IsBanned    bool       `json:"is_banned"`
+	BanReason   *string    `json:"ban_reason"`
+	BannedUntil *time.Time `json:"banned_until"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }

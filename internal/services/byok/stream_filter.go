@@ -5,9 +5,10 @@ import (
 	"strings"
 )
 
-// StreamSanitizer memfilter delta streaming secara incremental agar bond tags
-// dan <think> tidak bocor ke frontend. Fragmen yang berpotensi tag terpotong
-// antar-chunk ditahan (tidak di-emit) sampai chunk berikutnya tiba.
+// StreamSanitizer memfilter delta streaming secara incremental agar tag
+// legacy (sisa format bond/XP lama) dan <think> tidak bocor ke frontend.
+// Fragmen yang berpotensi tag terpotong antar-chunk ditahan (tidak di-emit)
+// sampai chunk berikutnya tiba.
 // Final CleanText tetap dihitung post-completion via ParseBondTags; Flush
 // hanya agar sisa delta terakhir tidak hilang.
 type StreamSanitizer struct {

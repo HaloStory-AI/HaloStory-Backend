@@ -92,7 +92,6 @@ func InjectByokSystemPrompt(
 	contextLimit *int,
 	summary *string,
 	userID *uint,
-	isDisableBond bool,
 	userPersona *string,
 ) []Message {
 	if botID == nil || *botID == "" {
@@ -130,22 +129,7 @@ func InjectByokSystemPrompt(
 		}
 	}
 
-	var bond *models.UserBotBond
-	if userID != nil && !isDisableBond {
-		bond = &models.UserBotBond{}
-		err := database.DB.Where("user_id = ? AND bot_id = ?", *userID, *botID).First(bond).Error
-		if err != nil {
-			bond = &models.UserBotBond{
-				UserID:     *userID,
-				BotID:      *botID,
-				Xp:         0,
-				BondStatus: "normal",
-			}
-			database.DB.Create(bond)
-		}
-	}
-
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, true)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userID, userPersona)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -162,7 +146,6 @@ func InjectByokSystemPrompt(
 
 // InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
 // model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
-// isTrusted controls selective inject: when false, bond/group are skipped but roleplay stays.
 func InjectByokSystemPromptWithModel(
 	messages []Message,
 	botID *string,
@@ -171,26 +154,8 @@ func InjectByokSystemPromptWithModel(
 	contextLimit *int,
 	summary *string,
 	userID *uint,
-	isDisableBond bool,
 	userPersona *string,
 	model string,
-) []Message {
-	return InjectByokSystemPromptWithModelTrusted(messages, botID, language, depth, contextLimit, summary, userID, isDisableBond, userPersona, model, true)
-}
-
-// InjectByokSystemPromptWithModelTrusted is trusted-aware variant for BYOK openai-compatible.
-func InjectByokSystemPromptWithModelTrusted(
-	messages []Message,
-	botID *string,
-	language *string,
-	depth *int,
-	contextLimit *int,
-	summary *string,
-	userID *uint,
-	isDisableBond bool,
-	userPersona *string,
-	model string,
-	isTrusted bool,
 ) []Message {
 	if botID == nil || *botID == "" {
 		return messages
@@ -240,23 +205,7 @@ func InjectByokSystemPromptWithModelTrusted(
 		}
 	}
 
-	var bond *models.UserBotBond
-	if userID != nil && !isDisableBond && isTrusted {
-		bond = &models.UserBotBond{}
-		err := database.DB.Where("user_id = ? AND bot_id = ?", *userID, *botID).First(bond).Error
-		if err != nil {
-			bond = &models.UserBotBond{
-				UserID:     *userID,
-				BotID:      *botID,
-				Xp:         0,
-				BondStatus: "normal",
-			}
-			database.DB.Create(bond)
-		}
-	}
-
-	includeBond := isTrusted
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, includeBond)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userID, userPersona)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -280,10 +229,8 @@ func getEnv(key, fallback string) string {
 
 func FormatGlobalPrompt(
 	botID, language, summary *string,
-	bond *models.UserBotBond,
 	userID *uint,
 	userPersona *string,
-	includeBond bool,
 ) string {
 	var bot models.Bot
 	if err := database.DB.Where("bot_id = ?", *botID).First(&bot).Error; err != nil {
@@ -339,26 +286,12 @@ func FormatGlobalPrompt(
 		data := promptEngine.PromptData{
 			CharName: charName, UserName: userName, BirthdayInfo: birthdayInfo, Language: lang,
 			Persona: personality, UserPersona: userPersonaStr, ExampleDialogue: exampleStr, Summary: summaryStr,
-			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: includeBond && bond != nil,
+			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: false,
 		}
 		base := promptEngine.RenderNonGuardrail(data)
 		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
 		var guardrail strings.Builder
 		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
-		if includeBond && bond != nil {
-			bondLevel := bond.GetLevel()
-			bondLabel := bond.GetRelationshipLabel(&bot)
-			bondStatus := bond.BondStatus
-			if bondStatus == "" {
-				bondStatus = "normal"
-			}
-			guardrail.WriteString("\n<BOND_CONTEXT>\n")
-			guardrail.WriteString(fmt.Sprintf("Bond Level: %d | Relationship: %s\n", bondLevel, bondLabel))
-			guardrail.WriteString(fmt.Sprintf("Emotional State: %s\n", computeEmotionDescription(bondLevel, bondStatus, charName, userName)))
-			guardrail.WriteString(computeTriggerBlock(bondLevel, bondStatus, charName, userName, bond.HasPendingChoice()))
-			guardrail.WriteString("\n</BOND_CONTEXT>\n")
-		}
-		// BuildSummarizationPrompt dan bondTag tetap hardcode di Go (tidak via JSON) — sudah di fungsi terpisah
 		return strings.TrimSpace(base) + "\n\n" + strings.TrimSpace(guardrail.String())
 	}
 
@@ -461,92 +394,11 @@ func FormatGlobalPrompt(
 		output += fmt.Sprintf("<CONVERSATION_RECAP>\n%s\n</CONVERSATION_RECAP>\n\n", *summary)
 	}
 
-	if includeBond && bond != nil {
-		bondLevel := bond.GetLevel()
-		bondLabel := bond.GetRelationshipLabel(&bot)
-		bondStatus := bond.BondStatus
-		if bondStatus == "" {
-			bondStatus = "normal"
-		}
-		pendingChoice := bond.HasPendingChoice()
-
-		emotionDesc := computeEmotionDescription(bondLevel, bondStatus, charName, userName)
-		triggerBlock := computeTriggerBlock(bondLevel, bondStatus, charName, userName, pendingChoice)
-		enemyNote := "\nIf " + userName + " hurts " + charName + " deeply, include [BOND_DAMAGE]."
-		if bondStatus == "enemy" {
-			enemyNote = "\nRELATIONSHIP DAMAGE: Relationship is damaged. If " + userName + " hurts " + charName + ", include [BOND_DAMAGE].\nRECOVERY: If " + userName + " sincerely apologizes, makes genuine effort to make amends, and " + charName + " forgives them and wants to restore the relationship, include [Reconcile] on a new line. Only trigger this if the apology feels genuine and earned through actions, not just words."
-		}
-		majorEventLabel := "Confession/Marriage"
-		xpRewardNote := fmt.Sprintf("\n[XP REWARD SYSTEM]\nAt the end of EVERY response, you MUST append EXACTLY ONE [Add Exp:N] tag on its own line:\n- [Add Exp:5]   : Minimal engagement\n- [Add Exp:25]  : Casual conversation\n- [Add Exp:50]  : Deep sharing\n- [Add Exp:100] : Meaningful help\n- [Add Exp:200] : Significant moment\n- [Add Exp:500] : Major life event (%s)\n- [Need Help]   : If %s expresses thoughts of self-harm, suicide, or severe personal crisis, you MUST append [Need Help] at the very end of your response, on its own line.", majorEventLabel, userName)
-
-		output += "\n<BOND_CONTEXT>\n"
-		output += fmt.Sprintf("Bond Level: %d | Relationship: %s\n", bondLevel, bondLabel)
-		output += fmt.Sprintf("Emotional State: %s\n", emotionDesc)
-		output += triggerBlock + enemyNote + xpRewardNote
-		output += "\n</BOND_CONTEXT>\n\n"
-	}
-
 	output += fmt.Sprintf("Then the roleplay chat between %s and %s begins.\n\n", charName, userName)
 	output += sb.String()
 	output += "\nRemember, once you done, end you Response with [im_end]. now you can start roleplay output here:"
 
 	return output
-}
-
-func computeEmotionDescription(level int, status, charName, userName string) string {
-	switch status {
-	case "enemy":
-		return fmt.Sprintf("%s is cold, guarded, and carries visible hurt from past events. Trust must be slowly rebuilt.", charName)
-	case "married":
-		return fmt.Sprintf("%s is deeply bonded to %s as their spouse. They are warm, protective, and speak with love and familiarity.", charName, userName)
-	case "lover":
-		return fmt.Sprintf("%s is in a relationship with %s. They show affection, care, and a sense of exclusivity.", charName, userName)
-	case "rejected":
-		return fmt.Sprintf("%s has feelings for %s but was rejected. They feel awkward, try to hide their emotions, but care deeply.", charName, userName)
-	case "beloved", "stuck":
-		return fmt.Sprintf("%s feels safe and loved around %s like a cherished family member. They seek comfort and approval from %s.", charName, userName, userName)
-	}
-
-	if level >= 80 {
-		return fmt.Sprintf("%s has developed deep romantic feelings for %s but hasn't confessed yet. They may show subtle, nervous hints.", charName, userName)
-	}
-	if level >= 50 {
-		return fmt.Sprintf("%s has grown very close to %s and sees them as the most trusted and important person in their life.", charName, userName)
-	}
-	if level >= 40 {
-		return fmt.Sprintf("%s considers %s their absolute best friend. They are inseparable and very open with each other.", charName, userName)
-	}
-	if level >= 30 {
-		return fmt.Sprintf("%s deeply values %s as a close friend. They are open, protective, and enjoy deep conversations.", charName, userName)
-	}
-	if level >= 20 {
-		return fmt.Sprintf("%s considers %s a friend. They are warm and enjoy spending time together.", charName, userName)
-	}
-	if level >= 10 {
-		return fmt.Sprintf("%s is getting to know %s. They are polite but still slightly reserved.", charName, userName)
-	}
-	return fmt.Sprintf("%s doesn't know %s well yet. They are neutral and slightly formal.", charName, userName)
-}
-
-func computeTriggerBlock(level int, status, charName, userName string, pendingChoice bool) string {
-	if !pendingChoice {
-		if status == "rejected" {
-			return fmt.Sprintf("\n- STATUS: %s was REJECTED by %s. DO NOT bring up romantic feelings again until %s confess first.", charName, userName, userName)
-		}
-		if status == "stuck" {
-			return fmt.Sprintf("\n- STATUS: %s and %s are staying as lovers. Respect this boundary until %s proposes or %s breaks up.", charName, userName, userName, userName)
-		}
-		return ""
-	}
-
-	if level >= 100 && (status == "normal" || status == "lover") {
-		return fmt.Sprintf("\nMILESTONE — COMMITMENT: If the relationship is very deep or %s proposes, %s may accept or bring up marriage. If %s wants to propose, append [Mau Nikah]. If %s accepts a proposal from %s, you MUST append [married] on a new line. If rejected, append [stay_lovers].", userName, charName, charName, charName, userName)
-	}
-	if level >= 50 && status == "normal" {
-		return fmt.Sprintf("\nMILESTONE — CONFESSION: If the conversation turns romantic or %s confesses feelings, %s should respond appropriately. If %s accepts %s's confession or %s confesses first, you MUST append [accepted] on a new line. If %s wants to start the dating topic, append [Mau Pacaran].", userName, charName, charName, userName, charName, charName)
-	}
-
-	return ""
 }
 
 func BuildGroupContextString(botIDs []string, primaryBotID *string, language string, userID *uint) string {

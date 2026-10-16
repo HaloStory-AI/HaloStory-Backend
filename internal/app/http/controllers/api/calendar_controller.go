@@ -18,20 +18,10 @@ type calendarItem struct {
 	Birthday *string `json:"birthday"`
 }
 
+// CalendarIndex melayani GET /v1/calendar.
+// Bond system dihapus: mengembalikan SEMUA bot yang punya birthday
+// (sebelumnya hanya bonded-bots) dengan struktur JSON yang sama.
 func CalendarIndex(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
-	var botIDs []string
-	database.DB.Model(&models.UserBotBond{}).
-		Where("user_id = ?", user.ID).
-		Pluck("bot_id", &botIDs)
-
-	if len(botIDs) == 0 {
-		c.JSON(http.StatusOK, []calendarItem{})
-		return
-	}
-
 	var bots []struct {
 		BotID    string
 		Name     string
@@ -39,7 +29,7 @@ func CalendarIndex(c *gin.Context) {
 		Birthday *time.Time
 	}
 	database.DB.Model(&models.Bot{}).
-		Where("bot_id IN ? AND birthday IS NOT NULL", botIDs).
+		Where("birthday IS NOT NULL").
 		Select("bot_id, name, avatar, birthday").
 		Find(&bots)
 

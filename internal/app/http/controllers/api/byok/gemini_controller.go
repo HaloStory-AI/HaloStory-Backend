@@ -164,9 +164,6 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
 	}
-	if req.IsDisableBond != nil {
-		payload["isdisablebond"] = *req.IsDisableBond
-	}
 	if req.UserPersona != nil {
 		payload["user_persona"] = *req.UserPersona
 	}

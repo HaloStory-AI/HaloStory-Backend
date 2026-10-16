@@ -101,7 +101,6 @@ type SystemAIChatParams struct {
 	IsSummarize       bool
 	HistoryDepth      int
 	IsGroup           bool
-	IsDisableBond     bool
 	UserPersona       string
 	BotIDs            []string
 	ExistingMemories  []string

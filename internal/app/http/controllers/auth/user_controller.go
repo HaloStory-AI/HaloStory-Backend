@@ -381,62 +381,6 @@ func UpdatePersona(c *gin.Context) {
 	})
 }
 
-// ───────────────────── Report Banned Device ─────────────────────
-
-func ReportBannedDevice(c *gin.Context) {
-	var req struct {
-		DeviceID    string  `json:"device_id" form:"device_id" binding:"required,max=500"`
-		DeviceModel *string `json:"device_model" form:"device_model" binding:"omitempty,max=255"`
-		DeviceBrand *string `json:"device_brand" form:"device_brand" binding:"omitempty,max=255"`
-		OsVersion   *string `json:"os_version" form:"os_version" binding:"omitempty,max=100"`
-		Platform    *string `json:"platform" form:"platform" binding:"omitempty,max=50"`
-		AppVersion  *string `json:"app_version" form:"app_version" binding:"omitempty,max=50"`
-	}
-	if err := c.ShouldBind(&req); err != nil {
-		status, resp := formatValidationErrors(err)
-		c.JSON(status, resp)
-		return
-	}
-	if strings.TrimSpace(req.DeviceID) == "" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"message": "The device id field is required.",
-			"errors": gin.H{
-				"device_id": []string{"The device id field is required."},
-			},
-		})
-		return
-	}
-
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-	now := time.Now()
-
-	ban := models.DeviceBan{
-		UserID:      &user.ID,
-		DeviceID:    req.DeviceID,
-		DeviceModel: req.DeviceModel,
-		DeviceBrand: req.DeviceBrand,
-		OsVersion:   req.OsVersion,
-		Platform:    req.Platform,
-		AppVersion:  req.AppVersion,
-		BannedAt:    &now,
-	}
-
-	var existing models.DeviceBan
-	result := database.DB.Where("device_id = ?", req.DeviceID).First(&existing)
-	if result.Error == nil {
-		ban.ID = existing.ID
-		ban.CreatedAt = existing.CreatedAt
-		database.DB.Save(&ban)
-	} else {
-		database.DB.Create(&ban)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Device reported.",
-	})
-}
-
 func CheckHasLocalPassword(c *gin.Context) {
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)

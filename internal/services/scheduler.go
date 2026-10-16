@@ -23,7 +23,6 @@ var schedulerHTTP = &http.Client{Timeout: 30 * time.Second}
 func StartScheduler() *cron.Cron {
 	c := cron.New()
 
-	c.AddFunc("@every 1m", unbanExpired)
 	c.AddFunc("@every 1m", cleanExpiredStories)
 	c.AddFunc("@every 10m", CleanExpiredChatJobs)
 	c.AddFunc("@every 1h", makeStories)
@@ -36,7 +35,7 @@ func StartScheduler() *cron.Cron {
 	c.AddFunc("0 0 * * 0", cleanupAnalytics)
 
 	c.Start()
-	log.Println("Scheduler: Started with tasks: unban-expired, clean-stories, clean-chat-jobs, make-stories, analytics")
+	log.Println("Scheduler: Started with tasks: clean-stories, clean-chat-jobs, make-stories, analytics")
 	return c
 }
 
@@ -45,27 +44,6 @@ func rollupDaily() {
 	if err := RollupDaily(yesterday); err != nil {
 		log.Printf("Analytics: RollupDaily failed: %v", err)
 	}
-}
-
-func unbanExpired() {
-	log.Println("Scheduler: Checking for expired bans...")
-
-	result := database.DB.Exec(
-		"UPDATE users SET is_banned = 0, ban_reason = NULL, banned_until = NULL WHERE is_banned = 1 AND banned_until < NOW()",
-	)
-
-	if result.Error != nil {
-		log.Printf("Scheduler: Error unbanning expired users: %v", result.Error)
-		return
-	}
-
-	if result.RowsAffected > 0 {
-		log.Printf("Scheduler: Successfully unbanned %d user(s)", result.RowsAffected)
-	} else {
-		log.Println("Scheduler: No expired bans found")
-	}
-
-	log.Println("Scheduler: Unban check complete!")
 }
 
 func cleanExpiredStories() {
@@ -87,11 +65,6 @@ func cleanExpiredStories() {
 	}
 
 	log.Println("Scheduler: Cron check complete!")
-}
-
-func RunUnbanExpiredOnce() {
-	log.Println("Running unban-expired once...")
-	unbanExpired()
 }
 
 func RunCleanStoriesOnce() {

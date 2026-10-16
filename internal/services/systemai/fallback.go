@@ -219,7 +219,7 @@ func RunFallbackChain(httpClient *http.Client, messages []byok.Message, params *
 
 // RunFallbackChainStream sama seperti RunFallbackChain tapi memakai SSE streaming
 // ke upstream (nvidia OpenAI-compatible). Setiap delta mentah difilter via
-// StreamSanitizer sebelum diteruskan ke onDelta agar bond tags/<think> tidak
+// StreamSanitizer sebelum diteruskan ke onDelta agar tag legacy/<think> tidak
 // bocor ke frontend. Hasil akhir authoritatif tetap via ParseBondTags
 // post-completion di worker; onDone menerima sisa flush sanitizer.
 func RunFallbackChainStream(ctx context.Context, messages []byok.Message, params *SystemAIChatParams, isVip bool, onDelta func(string) error) *ChainResult {
