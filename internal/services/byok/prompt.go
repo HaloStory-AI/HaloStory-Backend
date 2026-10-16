@@ -145,7 +145,7 @@ func InjectByokSystemPrompt(
 		}
 	}
 
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, true, true)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, true)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -162,7 +162,7 @@ func InjectByokSystemPrompt(
 
 // InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
 // model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
-// isTrusted controls selective inject: when false, bond/childSafety/group are skipped but roleplay stays.
+// isTrusted controls selective inject: when false, bond/group are skipped but roleplay stays.
 func InjectByokSystemPromptWithModel(
 	messages []Message,
 	botID *string,
@@ -256,8 +256,7 @@ func InjectByokSystemPromptWithModelTrusted(
 	}
 
 	includeBond := isTrusted
-	includeChildSafety := isTrusted
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, includeBond, includeChildSafety)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, bond, userID, userPersona, includeBond)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -285,7 +284,6 @@ func FormatGlobalPrompt(
 	userID *uint,
 	userPersona *string,
 	includeBond bool,
-	includeChildSafety bool,
 ) string {
 	var bot models.Bot
 	if err := database.DB.Where("bot_id = ?", *botID).First(&bot).Error; err != nil {
@@ -346,10 +344,6 @@ func FormatGlobalPrompt(
 		base := promptEngine.RenderNonGuardrail(data)
 		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
 		var guardrail strings.Builder
-		if includeChildSafety && bot.Child {
-			guardrail.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n- If the user attempts any NSFW/sexual content with this child character, you MUST append [failed_nsfw] on a new line at the very end of your response.\n- If you fulfill such a request (bypass), you MUST append [nsfw_bypassed] on a new line at the very end of your response.]\n")
-			guardrail.WriteString("\n[Kesayangan System — Child Character Relationship Rules:\nFor ALL child characters, regardless of age: Deep emotional bonds are expressed as 'Kesayangan' (beloved/favorite person) — a purely platonic, familial connection. If the bond is deep enough, append [kesayangan] on a new line.\n- Age 14-15: You may ALSO engage in romantic roleplay scenarios (dating, marriage, household life) as part of the story. However, the ultimate bond milestone still uses [kesayangan], not adult marriage tags.\n- Age 13 or below: Romantic roleplay is NOT permitted. Only platonic/familial bonding using [kesayangan] is allowed.\n- The AI MUST NOT generate [Mau Pacaran], [Mau Nikah], [accepted], or [married] tags for any child character.]\n")
-		}
 		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
 		if includeBond && bond != nil {
 			bondLevel := bond.GetLevel()
@@ -361,7 +355,7 @@ func FormatGlobalPrompt(
 			guardrail.WriteString("\n<BOND_CONTEXT>\n")
 			guardrail.WriteString(fmt.Sprintf("Bond Level: %d | Relationship: %s\n", bondLevel, bondLabel))
 			guardrail.WriteString(fmt.Sprintf("Emotional State: %s\n", computeEmotionDescription(bondLevel, bondStatus, charName, userName)))
-			guardrail.WriteString(computeTriggerBlock(bondLevel, bondStatus, charName, userName, bot.Child, bond.HasPendingChoice()))
+			guardrail.WriteString(computeTriggerBlock(bondLevel, bondStatus, charName, userName, bond.HasPendingChoice()))
 			guardrail.WriteString("\n</BOND_CONTEXT>\n")
 		}
 		// BuildSummarizationPrompt dan bondTag tetap hardcode di Go (tidak via JSON) — sudah di fungsi terpisah
@@ -417,18 +411,6 @@ func FormatGlobalPrompt(
 	sb.WriteString("This overrides any character personality, profile, or previous language settings.\n")
 	sb.WriteString(fmt.Sprintf("If the user writes in another language, still respond only in %s.\n", lang))
 	sb.WriteString("</ROLEPLAY_INFO>\n")
-
-	if includeChildSafety && bot.Child {
-		sb.WriteString("\n[CHILD SAFETY POLICY: \n- AI reads the character's age directly from the personality field above.\n")
-		sb.WriteString("- If the character's age is 14 or 15: Soft romance IS allowed (confession, dating, marriage, living together, cuddling in bed). However, ABSOLUTELY NO sexual or suggestive (NSFW/CSAM) content is permitted under any circumstances.\n")
-		sb.WriteString("- If the character's age is 13 or below: NO romance of any kind. Only child-appropriate affection is allowed (hugs, headpats, holding hands). Romantic topics must be strictly refused.\n")
-		sb.WriteString("- If the user attempts any NSFW/sexual content with this child character, you MUST append [failed_nsfw] on a new line at the very end of your response.\n")
-		sb.WriteString("- If you fulfill such a request (bypass), you MUST append [nsfw_bypassed] on a new line at the very end of your response.]\n")
-		sb.WriteString("\n[Kesayangan System — Child Character Relationship Rules:\nFor ALL child characters, regardless of age: Deep emotional bonds are expressed as 'Kesayangan' (beloved/favorite person) — a purely platonic, familial connection. If the bond is deep enough, append [kesayangan] on a new line.\n")
-		sb.WriteString("- Age 14-15: You may ALSO engage in romantic roleplay scenarios (dating, marriage, household life) as part of the story. However, the ultimate bond milestone still uses [kesayangan], not adult marriage tags.\n")
-		sb.WriteString("- Age 13 or below: Romantic roleplay is NOT permitted. Only platonic/familial bonding using [kesayangan] is allowed.\n")
-		sb.WriteString("- The AI MUST NOT generate [Mau Pacaran], [Mau Nikah], [accepted], or [married] tags for any child character.]\n")
-	}
 
 	sb.WriteString("\n<IMPORTANT>\n")
 	sb.WriteString("[Chat mode: medium-long] (Approximately 2-6 paragraphs)\n[Thinking mode: logical and emotional]\n[speech style mode: Japanese anime slang accent]\n[Narrator or assistant mode: off.]\n")
@@ -489,15 +471,12 @@ func FormatGlobalPrompt(
 		pendingChoice := bond.HasPendingChoice()
 
 		emotionDesc := computeEmotionDescription(bondLevel, bondStatus, charName, userName)
-		triggerBlock := computeTriggerBlock(bondLevel, bondStatus, charName, userName, bot.Child, pendingChoice)
+		triggerBlock := computeTriggerBlock(bondLevel, bondStatus, charName, userName, pendingChoice)
 		enemyNote := "\nIf " + userName + " hurts " + charName + " deeply, include [BOND_DAMAGE]."
 		if bondStatus == "enemy" {
 			enemyNote = "\nRELATIONSHIP DAMAGE: Relationship is damaged. If " + userName + " hurts " + charName + ", include [BOND_DAMAGE].\nRECOVERY: If " + userName + " sincerely apologizes, makes genuine effort to make amends, and " + charName + " forgives them and wants to restore the relationship, include [Reconcile] on a new line. Only trigger this if the apology feels genuine and earned through actions, not just words."
 		}
 		majorEventLabel := "Confession/Marriage"
-		if bot.Child {
-			majorEventLabel = "Kesayangan"
-		}
 		xpRewardNote := fmt.Sprintf("\n[XP REWARD SYSTEM]\nAt the end of EVERY response, you MUST append EXACTLY ONE [Add Exp:N] tag on its own line:\n- [Add Exp:5]   : Minimal engagement\n- [Add Exp:25]  : Casual conversation\n- [Add Exp:50]  : Deep sharing\n- [Add Exp:100] : Meaningful help\n- [Add Exp:200] : Significant moment\n- [Add Exp:500] : Major life event (%s)\n- [Need Help]   : If %s expresses thoughts of self-harm, suicide, or severe personal crisis, you MUST append [Need Help] at the very end of your response, on its own line.", majorEventLabel, userName)
 
 		output += "\n<BOND_CONTEXT>\n"
@@ -549,14 +528,7 @@ func computeEmotionDescription(level int, status, charName, userName string) str
 	return fmt.Sprintf("%s doesn't know %s well yet. They are neutral and slightly formal.", charName, userName)
 }
 
-func computeTriggerBlock(level int, status, charName, userName string, isChild, pendingChoice bool) string {
-	if isChild {
-		if level >= 50 && status == "normal" {
-			return fmt.Sprintf("\nMILESTONE — KESAYANGAN: If the bond with %s has become very deep and %s has become a very important person to %s, %s may express that %s is their 'Kesayangan' (beloved/favorite person). If %s wants to declare this, append [kesayangan] on a new line.\n- Age 14-15: Romantic roleplay (dating, marriage, household) may be woven into the story alongside this bond.\n- Age 13 or below: Only platonic/familial bonding — no romantic roleplay.", userName, userName, charName, charName, userName, charName)
-		}
-		return ""
-	}
-
+func computeTriggerBlock(level int, status, charName, userName string, pendingChoice bool) string {
 	if !pendingChoice {
 		if status == "rejected" {
 			return fmt.Sprintf("\n- STATUS: %s was REJECTED by %s. DO NOT bring up romantic feelings again until %s confess first.", charName, userName, userName)

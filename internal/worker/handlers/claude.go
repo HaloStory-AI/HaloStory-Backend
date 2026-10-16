@@ -1,12 +1,10 @@
-package handlers
+﻿package handlers
 
 import (
 	"context"
 	"log"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/utils"
@@ -39,7 +37,7 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 	if userID > 0 {
 		acquired, err := types.AcquireChatLock(userID, botID, data.IsGroup)
 		if err == nil && !acquired {
-			log.Printf("Worker: Job %s skipped — overlapping lock held", uuid)
+			log.Printf("Worker: Job %s skipped â€” overlapping lock held", uuid)
 			return nil, 0, nil
 		}
 		if err == nil && acquired {
@@ -137,15 +135,6 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 			openaiFormat["choices"] = choices
 		}
 
-		var bot models.Bot
-		database.DB.Where("bot_id = ?", data.BotID).First(&bot)
-		var user models.User
-		database.DB.First(&user, userID)
-		if bot.BotID != "" && user.ID != 0 {
-			origMessages, _ := DecodeMessages(data.Messages)
-			lastUser := LastUserMessage(origMessages)
-			byok.HandleChildSafety(&bot, &user, lastUser, content, parsed.Tags)
-		}
 
 		if !data.IsGroup && !data.IsDisableBond {
 			bondResult := byok.AddBondXp(data.BotID, parsed, userID)

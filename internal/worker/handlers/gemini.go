@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"context"
@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/utils"
@@ -41,7 +39,7 @@ func HandleGemini(ctx context.Context, uuid string, data types.ChatData) (map[st
 	if userID > 0 {
 		acquired, err := types.AcquireChatLock(userID, botID, data.IsGroup)
 		if err == nil && !acquired {
-			log.Printf("Worker: Job %s skipped — overlapping lock held", uuid)
+			log.Printf("Worker: Job %s skipped â€” overlapping lock held", uuid)
 			return nil, 0, nil
 		}
 		if err == nil && acquired {
@@ -199,15 +197,6 @@ func HandleGemini(ctx context.Context, uuid string, data types.ChatData) (map[st
 		parsed := byok.ParseBondTags(content)
 		openaiResp.Choices[0].Message.Content = parsed.CleanText
 
-		var bot models.Bot
-		database.DB.Where("bot_id = ?", data.BotID).First(&bot)
-		var user models.User
-		database.DB.First(&user, userID)
-		if bot.BotID != "" && user.ID != 0 {
-			rawMessages, _ := DecodeMessages(data.Messages)
-			lastUser := LastUserMessage(rawMessages)
-			byok.HandleChildSafety(&bot, &user, lastUser, content, parsed.Tags)
-		}
 
 		respBytes, _ := json.Marshal(openaiResp)
 		var respMap map[string]interface{}

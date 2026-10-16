@@ -19,19 +19,6 @@ func DecryptKey(encrypted string) (string, *types.WorkerError) {
 	return decrypted, nil
 }
 
-// DecodeMessages decodes base64-encoded JSON messages from the payload.
-func DecodeMessages(b64 string) ([]byok.Message, *types.WorkerError) {
-	raw, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return nil, types.NewWorkerError("Failed to decode messages", 400)
-	}
-	var messages []byok.Message
-	if err := json.Unmarshal(raw, &messages); err != nil {
-		return nil, types.NewWorkerError("Failed to parse messages", 400)
-	}
-	return messages, nil
-}
-
 // DecodeMessagesRaw returns the raw JSON bytes plus parsed messages.
 func DecodeMessagesRaw(b64 string) ([]byte, []byok.Message, *types.WorkerError) {
 	raw, err := base64.StdEncoding.DecodeString(b64)
@@ -84,7 +71,7 @@ func UserPersonaPtr(s string) *string {
 }
 
 // PreparePromptMessages applies lore injection, system prompt injection, and group context
-// in a single reusable pipeline. isTrusted controls bond/childSafety inclusion (BYOK openai-compatible).
+// in a single reusable pipeline. isTrusted controls bond inclusion (BYOK openai-compatible).
 func PreparePromptMessages(
 	messages []byok.Message,
 	botID string,
@@ -165,16 +152,6 @@ func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 		out = append(out, byok.OpenAIChatMessage{Role: role, Content: content})
 	}
 	return out
-}
-
-// LastUserMessage returns the last user message content from the original (pre-injection) messages.
-func LastUserMessage(originalMessages []byok.Message) string {
-	for i := len(originalMessages) - 1; i >= 0; i-- {
-		if originalMessages[i].Role == "user" {
-			return originalMessages[i].Content.AsText()
-		}
-	}
-	return ""
 }
 
 // EnsureJSON is a helper to marshal without error (panic on marshal failure is impossible for maps).

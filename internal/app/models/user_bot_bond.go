@@ -65,37 +65,20 @@ func (b *UserBotBond) GetRelationshipLabel(bot *Bot) string {
 		status = "normal"
 	}
 
-	isChild := bot != nil && bot.Child
-
-	if isChild {
-		if status == "enemy" {
-			return "Musuh"
-		}
-		if status == "beloved" || status == "lover" || status == "married" {
-			return "Kesayangan"
-		}
-		if status == "rejected" {
-			return "Menolak"
-		}
-		if level >= 50 {
-			return "Kesayangan"
-		}
-	} else {
-		if status == "enemy" {
-			return "Musuh"
-		}
-		if status == "married" {
-			return "Suami/Istri"
-		}
-		if status == "lover" {
-			return "Pacar"
-		}
-		if status == "rejected" {
-			return "Menolak Perasaan"
-		}
-		if level >= 50 {
-			return "Naksir"
-		}
+	if status == "enemy" {
+		return "Musuh"
+	}
+	if status == "married" {
+		return "Suami/Istri"
+	}
+	if status == "lover" {
+		return "Pacar"
+	}
+	if status == "rejected" {
+		return "Menolak Perasaan"
+	}
+	if level >= 50 {
+		return "Naksir"
 	}
 
 	if level >= 40 {

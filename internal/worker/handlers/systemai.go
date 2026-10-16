@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"time"
 
@@ -17,11 +16,10 @@ import (
 
 // HandleSystemAI handles a System AI chat job (non-summarization).
 func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[string]interface{}, int, *types.WorkerError, uint) {
-	rawBytes, messages, werr := DecodeMessagesRaw(data.Messages)
+	_, messages, werr := DecodeMessagesRaw(data.Messages)
 	if werr != nil {
 		return nil, 0, werr, 0
 	}
-	_ = rawBytes
 
 	userID := uint(data.UserID)
 	botID := data.BotID
@@ -155,20 +153,6 @@ func HandleSystemAI(ctx context.Context, uuid string, data types.ChatData) (map[
 
 	var bot models.Bot
 	database.DB.Where("bot_id = ?", data.BotID).First(&bot)
-
-	// Decode original for last user message (child safety)
-	var originalMessages []byok.Message
-	_ = json.Unmarshal(rawBytes, &originalMessages)
-	lastUserMessage := ""
-	for i := len(originalMessages) - 1; i >= 0; i-- {
-		if originalMessages[i].Role == "user" {
-			lastUserMessage = originalMessages[i].Content.AsText()
-			break
-		}
-	}
-	if bot.BotID != "" && user.ID != 0 {
-		byok.HandleChildSafety(&bot, &user, lastUserMessage, content, parsed.Tags)
-	}
 
 	bondEvent := ""
 	bondStatus := ""

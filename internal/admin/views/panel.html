@@ -230,7 +230,6 @@ async function loadBots() {
             <div><label class="block text-xs text-gray-400 mb-1">Kategori</label><select id="botFormCategory" class="input rounded-lg w-full px-3 py-2 text-sm"></select></div>
             <div class="flex gap-2"><div class="flex-1"><label class="block text-xs text-gray-400 mb-1">SBR</label><select id="botFormSBR" class="input rounded-lg w-full px-3 py-2 text-sm"><option value="">None</option><option value="PG">PG</option><option value="PG-13">PG-13</option><option value="R">R</option></select></div><div class="flex-1"><label class="block text-xs text-gray-400 mb-1">Color</label><input id="botFormColor" type="color" class="input rounded-lg w-full px-1 py-2 text-sm h-[38px]"></div></div>
             <div><label class="block text-xs text-gray-400 mb-1">Birthday</label><input id="botFormBirthday" type="date" class="input rounded-lg w-full px-3 py-2 text-sm"></div>
-            <div class="flex items-center gap-2 pt-6"><label class="flex items-center gap-2 cursor-pointer"><input id="botFormChild" type="checkbox" class="accent-purple-500"><span class="text-sm text-gray-300">Child Safe</span></label></div>
           </div>
           <div><label class="block text-xs text-gray-400 mb-1">Avatar URL</label><input id="botFormAvatar" class="input rounded-lg w-full px-3 py-2 text-sm" placeholder="https://..."></div>
           <div><label class="block text-xs text-gray-400 mb-1">Deskripsi</label><textarea id="botFormDescription" rows="2" class="input rounded-lg w-full px-3 py-2 text-sm"></textarea></div>
@@ -258,12 +257,12 @@ function renderBotsTable() {
     const items = botsData.filter(b => b.category_slug === cat);
     html += '<tr class="bg-white/5"><td colspan="7" class="text-sm font-semibold text-purple-300">' + cat + '</td></tr>';
     items.forEach(b => {
-      html += '<tr><td><input type="checkbox" class="bot-cb accent-purple-500" value="'+b.bot_id+'" onchange="updateBulkBar()"></td><td>'+(b.avatar?'<img src="'+b.avatar+'" class="avatar" onerror="this.style.display=\'none\'">':'<div class="avatar flex items-center justify-center bg-purple-600/30"><i class="fa-solid fa-robot text-purple-400 text-xs"></i></div>')+'</td><td class="text-sm font-mono text-purple-300">'+b.bot_id+'</td><td class="text-sm">'+b.name+(b.child?' <span class="badge bg-green-600/20 text-green-400">CHILD</span>':'')+'</td><td class="text-sm text-gray-400">'+ (b.category_slug||'-') +'</td><td class="text-sm text-gray-400">'+(b.birthday||'-')+'</td><td class="text-sm"><button onclick="editBot(\''+b.bot_id+'\')" class="btn-sm bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 mr-1"><i class="fa-solid fa-pen"></i></button><button onclick="deleteBot(\''+b.bot_id+'\')" class="btn-sm bg-red-600/20 text-red-400 hover:bg-red-600/30"><i class="fa-solid fa-trash"></i></button></td></tr>';
+      html += '<tr><td><input type="checkbox" class="bot-cb accent-purple-500" value="'+b.bot_id+'" onchange="updateBulkBar()"></td><td>'+(b.avatar?'<img src="'+b.avatar+'" class="avatar" onerror="this.style.display=\'none\'">':'<div class="avatar flex items-center justify-center bg-purple-600/30"><i class="fa-solid fa-robot text-purple-400 text-xs"></i></div>')+'</td><td class="text-sm font-mono text-purple-300">'+b.bot_id+'</td><td class="text-sm">'+b.name+'</td><td class="text-sm text-gray-400">'+ (b.category_slug||'-') +'</td><td class="text-sm text-gray-400">'+(b.birthday||'-')+'</td><td class="text-sm"><button onclick="editBot(\''+b.bot_id+'\')" class="btn-sm bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 mr-1"><i class="fa-solid fa-pen"></i></button><button onclick="deleteBot(\''+b.bot_id+'\')" class="btn-sm bg-red-600/20 text-red-400 hover:bg-red-600/30"><i class="fa-solid fa-trash"></i></button></td></tr>';
     });
   });
   if (!cats.length) {
     botsData.forEach(b => {
-      html += '<tr><td><input type="checkbox" class="bot-cb accent-purple-500" value="'+b.bot_id+'" onchange="updateBulkBar()"></td><td>'+(b.avatar?'<img src="'+b.avatar+'" class="avatar">':'<div class="avatar flex items-center justify-center bg-purple-600/30"><i class="fa-solid fa-robot text-purple-400 text-xs"></i></div>')+'</td><td class="text-sm font-mono text-purple-300">'+b.bot_id+'</td><td class="text-sm">'+b.name+(b.child?' <span class="badge bg-green-600/20 text-green-400">CHILD</span>':'')+'</td><td class="text-sm text-gray-400">-</td><td class="text-sm text-gray-400">'+(b.birthday||'-')+'</td><td class="text-sm"><button onclick="editBot(\''+b.bot_id+'\')" class="btn-sm bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 mr-1"><i class="fa-solid fa-pen"></i></button><button onclick="deleteBot(\''+b.bot_id+'\')" class="btn-sm bg-red-600/20 text-red-400 hover:bg-red-600/30"><i class="fa-solid fa-trash"></i></button></td></tr>';
+      html += '<tr><td><input type="checkbox" class="bot-cb accent-purple-500" value="'+b.bot_id+'" onchange="updateBulkBar()"></td><td>'+(b.avatar?'<img src="'+b.avatar+'" class="avatar">':'<div class="avatar flex items-center justify-center bg-purple-600/30"><i class="fa-solid fa-robot text-purple-400 text-xs"></i></div>')+'</td><td class="text-sm font-mono text-purple-300">'+b.bot_id+'</td><td class="text-sm">'+b.name+'</td><td class="text-sm text-gray-400">-</td><td class="text-sm text-gray-400">'+(b.birthday||'-')+'</td><td class="text-sm"><button onclick="editBot(\''+b.bot_id+'\')" class="btn-sm bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 mr-1"><i class="fa-solid fa-pen"></i></button><button onclick="deleteBot(\''+b.bot_id+'\')" class="btn-sm bg-red-600/20 text-red-400 hover:bg-red-600/30"><i class="fa-solid fa-trash"></i></button></td></tr>';
     });
   }
   tbody.innerHTML = html;
@@ -309,7 +308,6 @@ function showBotForm(data) {
   document.getElementById('botFormSBR').value = data ? (data.sbr||'') : '';
   document.getElementById('botFormBirthday').value = data ? (data.birthday||'') : '';
   document.getElementById('botFormColor').value = data ? (data.color||'#a855f7') : '#a855f7';
-  document.getElementById('botFormChild').checked = data ? !!data.child : false;
   document.getElementById('botFormAvatar').value = data ? (data.avatar||'') : '';
   // Load categories into dropdown
   api('/api/v1/categories').then(res => {
@@ -341,7 +339,6 @@ async function saveBot(e) {
     sbr: document.getElementById('botFormSBR').value,
     birthday: document.getElementById('botFormBirthday').value,
     color: document.getElementById('botFormColor').value,
-    child: document.getElementById('botFormChild').checked,
     avatar: document.getElementById('botFormAvatar').value
   };
   const url = editId ? '/api/admin/bots/' + editId : '/api/admin/bots';
@@ -362,7 +359,7 @@ let bulkEntryCount = 0;
 function addBulkEntry(data) {
   const el = document.getElementById('bulkEntries');
   const i = bulkEntryCount++;
-  el.innerHTML += '<div class="bulk-entry card-sm rounded-lg p-3 mb-2" data-id="'+i+'"><div class="grid grid-cols-2 gap-2"><input class="input rounded px-2 py-1 text-sm" name="bot_id_'+i+'" placeholder="Bot ID" value="'+(data?.bot_id||'')+'"><input class="input rounded px-2 py-1 text-sm" name="name_'+i+'" placeholder="Nama" value="'+(data?.name||'')+'"><input class="input rounded px-2 py-1 text-sm" name="category_'+i+'" placeholder="Kategori" value="'+(data?.category_slug||'')+'"><input class="input rounded px-2 py-1 text-sm" name="sbr_'+i+'" placeholder="SBR" value="'+(data?.sbr||'')+'"><input class="input rounded px-2 py-1 text-sm" name="birthday_'+i+'" placeholder="Birthday" value="'+(data?.birthday||'')+'"><input class="input rounded px-2 py-1 text-sm" name="color_'+i+'" placeholder="Color" value="'+(data?.color||'')+'"></div><input class="input rounded w-full px-2 py-1 text-sm mt-2" name="description_'+i+'" placeholder="Deskripsi" value="'+(data?.description||'')+'"><div class="flex justify-between mt-2"><label class="flex items-center gap-1 text-xs text-gray-400"><input type="checkbox" name="child_'+i+'" class="accent-purple-500"'+(data?.child?' checked':'')+'> Child Safe</label><button onclick="this.closest(\'.bulk-entry\').remove()" class="text-xs text-red-400 hover:text-red-300"><i class="fa-solid fa-xmark"></i></button></div></div>';
+  el.innerHTML += '<div class="bulk-entry card-sm rounded-lg p-3 mb-2" data-id="'+i+'"><div class="grid grid-cols-2 gap-2"><input class="input rounded px-2 py-1 text-sm" name="bot_id_'+i+'" placeholder="Bot ID" value="'+(data?.bot_id||'')+'"><input class="input rounded px-2 py-1 text-sm" name="name_'+i+'" placeholder="Nama" value="'+(data?.name||'')+'"><input class="input rounded px-2 py-1 text-sm" name="category_'+i+'" placeholder="Kategori" value="'+(data?.category_slug||'')+'"><input class="input rounded px-2 py-1 text-sm" name="sbr_'+i+'" placeholder="SBR" value="'+(data?.sbr||'')+'"><input class="input rounded px-2 py-1 text-sm" name="birthday_'+i+'" placeholder="Birthday" value="'+(data?.birthday||'')+'"><input class="input rounded px-2 py-1 text-sm" name="color_'+i+'" placeholder="Color" value="'+(data?.color||'')+'"></div><input class="input rounded w-full px-2 py-1 text-sm mt-2" name="description_'+i+'" placeholder="Deskripsi" value="'+(data?.description||'')+'"><div class="flex justify-between mt-2"><button onclick="this.closest(\'.bulk-entry\').remove()" class="text-xs text-red-400 hover:text-red-300"><i class="fa-solid fa-xmark"></i></button></div></div>';
 }
 
 async function doBulkStore() {
@@ -376,8 +373,7 @@ async function doBulkStore() {
       sbr: div.querySelector('[name="sbr_'+id+'"]')?.value || '',
       birthday: div.querySelector('[name="birthday_'+id+'"]')?.value || '',
       color: div.querySelector('[name="color_'+id+'"]')?.value || '',
-      description: div.querySelector('[name="description_'+id+'"]')?.value || '',
-      child: div.querySelector('[name="child_'+id+'"]')?.checked || false
+      description: div.querySelector('[name="description_'+id+'"]')?.value || ''
     });
   });
   if (!entries.length) { toast('Tidak ada entry', 'error'); return; }

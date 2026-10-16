@@ -118,17 +118,6 @@ func BondHandleChoice(c *gin.Context) {
 		return
 	}
 
-	var bot models.Bot
-	database.DB.Where("bot_id = ?", botID).First(&bot)
-
-	if bot.Child && req.Choice != "beloved" && req.Choice != "reject_love" {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{
-			"success": false,
-			"message": "Invalid choice for child character.",
-		})
-		return
-	}
-
 	userVal, _ := c.Get("user")
 	user := userVal.(models.User)
 	var bond models.UserBotBond
