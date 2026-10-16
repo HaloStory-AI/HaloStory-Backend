@@ -36,6 +36,7 @@ type BYOKRequest struct {
 	HistoryDepth     *int             `json:"history_depth,omitempty"`
 	IsGroup          *bool            `json:"is_group,omitempty"`
 	UserPersona      *string          `json:"user_persona,omitempty"`
+	UserName         *string          `json:"user_name,omitempty"`
 	BotIDs           []string         `json:"bot_ids,omitempty"`
 	ExistingMemories []string         `json:"existing_memories,omitempty"`
 	TopA             *float64         `json:"top_a,omitempty"`

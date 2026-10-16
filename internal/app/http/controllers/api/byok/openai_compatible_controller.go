@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/utils"
@@ -17,39 +17,37 @@ import (
 )
 
 type OpenAICompatibleChatRequest struct {
-	Messages          []byokSvc.Message       `json:"messages" binding:"required"`
-	APIKey            string                  `json:"api_key" binding:"required"`
-	BaseURL           string                  `json:"base_url" binding:"required"`
-	Model             string                  `json:"model"`
-	Temperature       *float64                `json:"temperature,omitempty"`
-	MaxTokens         *int                    `json:"max_tokens,omitempty"`
-	TopP              *float64                `json:"top_p,omitempty"`
-	TopK              *int                    `json:"top_k,omitempty"`
-	TopA              *float64                `json:"top_a,omitempty"`
-	MinP              *float64                `json:"min_p,omitempty"`
-	RepetitionPenalty *float64                `json:"repetition_penalty,omitempty"`
-	FrequencyPenalty  *float64                `json:"frequency_penalty,omitempty"`
-	PresencePenalty   *float64                `json:"presence_penalty,omitempty"`
-	Stop              []string                `json:"stop,omitempty"`
+	Messages          []byokSvc.Message        `json:"messages" binding:"required"`
+	APIKey            string                   `json:"api_key" binding:"required"`
+	BaseURL           string                   `json:"base_url" binding:"required"`
+	Model             string                   `json:"model"`
+	Temperature       *float64                 `json:"temperature,omitempty"`
+	MaxTokens         *int                     `json:"max_tokens,omitempty"`
+	TopP              *float64                 `json:"top_p,omitempty"`
+	TopK              *int                     `json:"top_k,omitempty"`
+	TopA              *float64                 `json:"top_a,omitempty"`
+	MinP              *float64                 `json:"min_p,omitempty"`
+	RepetitionPenalty *float64                 `json:"repetition_penalty,omitempty"`
+	FrequencyPenalty  *float64                 `json:"frequency_penalty,omitempty"`
+	PresencePenalty   *float64                 `json:"presence_penalty,omitempty"`
+	Stop              []string                 `json:"stop,omitempty"`
 	Reasoning         *byokSvc.ReasoningConfig `json:"reasoning,omitempty"`
-	ResponseLength    *int                    `json:"response_length,omitempty"`
-	Summary           *string                 `json:"summary,omitempty"`
-	IsSummarize       *bool                   `json:"is_summarize,omitempty"`
-	ExistingMemories  []string                `json:"existing_memories,omitempty"`
-	Language          *string                 `json:"language,omitempty"`
-	HistoryDepth      *int                    `json:"history_depth,omitempty"`
-	IsGroup           *bool                   `json:"is_group,omitempty"`
-	UserPersona       *string                 `json:"user_persona,omitempty"`
-	BotIDs            []string                `json:"bot_ids,omitempty"`
-	BotID             *string                 `json:"bot_id,omitempty"`
-	ContextLimit      *int                    `json:"context_limit,omitempty"`
-	Stream            *bool                   `json:"stream,omitempty"`
+	ResponseLength    *int                     `json:"response_length,omitempty"`
+	Summary           *string                  `json:"summary,omitempty"`
+	IsSummarize       *bool                    `json:"is_summarize,omitempty"`
+	ExistingMemories  []string                 `json:"existing_memories,omitempty"`
+	Language          *string                  `json:"language,omitempty"`
+	HistoryDepth      *int                     `json:"history_depth,omitempty"`
+	IsGroup           *bool                    `json:"is_group,omitempty"`
+	UserPersona       *string                  `json:"user_persona,omitempty"`
+	UserName          *string                  `json:"user_name,omitempty"`
+	BotIDs            []string                 `json:"bot_ids,omitempty"`
+	BotID             *string                  `json:"bot_id,omitempty"`
+	ContextLimit      *int                     `json:"context_limit,omitempty"`
+	Stream            *bool                    `json:"stream,omitempty"`
 }
 
 func OpenAICompatibleChat(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
 	var req OpenAICompatibleChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -95,6 +93,7 @@ func OpenAICompatibleChat(c *gin.Context) {
 		HistoryDepth:      req.HistoryDepth,
 		IsGroup:           req.IsGroup,
 		UserPersona:       req.UserPersona,
+		UserName:          req.UserName,
 		BotIDs:            req.BotIDs,
 		ExistingMemories:  req.ExistingMemories,
 		BotID:             req.BotID,
@@ -138,7 +137,15 @@ func OpenAICompatibleChat(c *gin.Context) {
 	c.Header("X-Request-Id", traceID)
 	c.Header("X-Trace-Id", traceID)
 
-	payload := buildOpenAIPayload(req, encryptedKey, messagesB64, user.ID, uid, model)
+	userName := ""
+	if req.UserName != nil {
+		userName = strings.TrimSpace(*req.UserName)
+	}
+	if userName == "" {
+		userName = "Sensei"
+	}
+
+	payload := buildOpenAIPayload(req, encryptedKey, messagesB64, uid, model, userName)
 	payload["trace_id"] = traceID
 
 	payloadJSON, _ := json.Marshal(payload)
@@ -169,16 +176,19 @@ func OpenAICompatibleChat(c *gin.Context) {
 	})
 }
 
-func buildOpenAIPayload(req OpenAICompatibleChatRequest, encryptedKey, messagesB64 string, userID uint, uid, model string) map[string]interface{} {
+func buildOpenAIPayload(req OpenAICompatibleChatRequest, encryptedKey, messagesB64 string, uid, model, userName string) map[string]interface{} {
 	payload := map[string]interface{}{
-		"uuid":     uid,
-		"status":   "queued",
-		"api_key":  encryptedKey,
-		"messages": messagesB64,
-		"base_url": req.BaseURL,
-		"model":    model,
-		"provider": "openai-compatible",
-		"user_id":  userID,
+		"uuid":      uid,
+		"status":    "queued",
+		"api_key":   encryptedKey,
+		"messages":  messagesB64,
+		"base_url":  req.BaseURL,
+		"model":     model,
+		"provider":  "openai-compatible",
+		"user_name": userName,
+	}
+	if req.UserPersona != nil {
+		payload["user_persona"] = *req.UserPersona
 	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
@@ -233,9 +243,6 @@ func buildOpenAIPayload(req OpenAICompatibleChatRequest, encryptedKey, messagesB
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
-	}
-	if req.UserPersona != nil {
-		payload["user_persona"] = *req.UserPersona
 	}
 	if len(req.BotIDs) > 0 {
 		payload["bot_ids"] = req.BotIDs

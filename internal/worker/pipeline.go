@@ -7,8 +7,6 @@ import (
 	"log"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/database"
 	"halostory_go_backend/internal/services"
 	"halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/services/llm"
@@ -50,26 +48,6 @@ func ProcessJob(rawData []byte) {
 	data.Status = "processing"
 	updateJSON, _ := json.Marshal(data)
 	services.StoreProcessingResilient(uuid, updateJSON)
-
-	if data.UserID > 0 {
-		userID := uint(data.UserID)
-		at := "chat"
-		if data.IsSummarize {
-			at = "chat_summarize"
-		}
-		botID := data.BotID
-		prov := data.Provider
-		go func(uid uint, a, b, p string) {
-			var bID, provPtr *string
-			if b != "" {
-				bID = &b
-			}
-			if p != "" {
-				provPtr = &p
-			}
-			_ = database.DB.Create(&models.UserActivity{UserID: uid, ActivityType: a, BotID: bID, Provider: provPtr}).Error
-		}(userID, at, botID, prov)
-	}
 
 	if llm.IsDispatcherEnabled() {
 		_ = llm.Default.Validate(data.Provider, data.Model, &data.BaseURL)

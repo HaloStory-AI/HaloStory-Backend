@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/services/llm"
@@ -18,38 +18,36 @@ import (
 )
 
 type OpenAIProviderRequest struct {
-	Messages          []byokSvc.Message       `json:"messages" binding:"required"`
-	APIKey            string                  `json:"api_key" binding:"required"`
-	Model             string                  `json:"model"`
-	Temperature       *float64                `json:"temperature,omitempty"`
-	MaxTokens         *int                    `json:"max_tokens,omitempty"`
-	TopP              *float64                `json:"top_p,omitempty"`
-	Stop              []string                `json:"stop,omitempty"`
-	FrequencyPenalty  *float64                `json:"frequency_penalty,omitempty"`
-	PresencePenalty   *float64                `json:"presence_penalty,omitempty"`
-	TopK              *int                    `json:"top_k,omitempty"`
-	MinP              *float64                `json:"min_p,omitempty"`
-	RepetitionPenalty *float64                `json:"repetition_penalty,omitempty"`
-	IncludeReasoning  *bool                   `json:"include_reasoning,omitempty"`
+	Messages          []byokSvc.Message        `json:"messages" binding:"required"`
+	APIKey            string                   `json:"api_key" binding:"required"`
+	Model             string                   `json:"model"`
+	Temperature       *float64                 `json:"temperature,omitempty"`
+	MaxTokens         *int                     `json:"max_tokens,omitempty"`
+	TopP              *float64                 `json:"top_p,omitempty"`
+	Stop              []string                 `json:"stop,omitempty"`
+	FrequencyPenalty  *float64                 `json:"frequency_penalty,omitempty"`
+	PresencePenalty   *float64                 `json:"presence_penalty,omitempty"`
+	TopK              *int                     `json:"top_k,omitempty"`
+	MinP              *float64                 `json:"min_p,omitempty"`
+	RepetitionPenalty *float64                 `json:"repetition_penalty,omitempty"`
+	IncludeReasoning  *bool                    `json:"include_reasoning,omitempty"`
 	Reasoning         *byokSvc.ReasoningConfig `json:"reasoning,omitempty"`
-	ResponseLength    *int                    `json:"response_length,omitempty"`
-	Summary           *string                 `json:"summary,omitempty"`
-	IsSummarize       *bool                   `json:"is_summarize,omitempty"`
-	ExistingMemories  []string                `json:"existing_memories,omitempty"`
-	Language          *string                 `json:"language,omitempty"`
-	HistoryDepth      *int                    `json:"history_depth,omitempty"`
-	IsGroup           *bool                   `json:"is_group,omitempty"`
-	UserPersona       *string                 `json:"user_persona,omitempty"`
-	BotIDs            []string                `json:"bot_ids,omitempty"`
-	BotID             *string                 `json:"bot_id,omitempty"`
-	ContextLimit      *int                    `json:"context_limit,omitempty"`
-	Stream            *bool                   `json:"stream,omitempty"`
+	ResponseLength    *int                     `json:"response_length,omitempty"`
+	Summary           *string                  `json:"summary,omitempty"`
+	IsSummarize       *bool                    `json:"is_summarize,omitempty"`
+	ExistingMemories  []string                 `json:"existing_memories,omitempty"`
+	Language          *string                  `json:"language,omitempty"`
+	HistoryDepth      *int                     `json:"history_depth,omitempty"`
+	IsGroup           *bool                    `json:"is_group,omitempty"`
+	UserPersona       *string                  `json:"user_persona,omitempty"`
+	UserName          *string                  `json:"user_name,omitempty"`
+	BotIDs            []string                 `json:"bot_ids,omitempty"`
+	BotID             *string                  `json:"bot_id,omitempty"`
+	ContextLimit      *int                     `json:"context_limit,omitempty"`
+	Stream            *bool                    `json:"stream,omitempty"`
 }
 
 func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, provider, defaultModel string) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
 	if req.APIKey == "" || len(req.Messages) == 0 {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error":   "Validation failed",
@@ -63,16 +61,9 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 		model = defaultModel
 	}
 
-	// Fase 2: registry validate (non-blocking, log only)
 	_ = llm.Default.Validate(provider, model, nil)
 
-	// Sensei hybrid: block vision
-	for _, m := range req.Messages {
-		if m.Content.HasImage() && user.Role == "Sensei" {
-			c.JSON(http.StatusForbidden, gin.H{"message": "Sensei tidak dapat mengirim foto/sticker"})
-			return
-		}
-	}
+	// No VIP/Sensei block — public BYOK relay
 	if err := byokSvc.SanitizeByokInput(&byokSvc.BYOKRequest{
 		Messages:          req.Messages,
 		APIKey:            req.APIKey,
@@ -137,16 +128,29 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	c.Header("X-Request-Id", traceID)
 	c.Header("X-Trace-Id", traceID)
 
+	userName := ""
+	if req.UserName != nil {
+		userName = strings.TrimSpace(*req.UserName)
+	}
+	if userName == "" {
+		userName = "Sensei"
+	}
+	userPersona := ""
+	if req.UserPersona != nil {
+		userPersona = *req.UserPersona
+	}
+
 	payload := map[string]interface{}{
-		"uuid":     uid,
-		"status":   "queued",
-		"api_key":  encryptedKey,
-		"messages": messagesB64,
-		"base_url": baseURL,
-		"model":    model,
-		"provider": provider,
-		"user_id":  user.ID,
-		"trace_id": traceID,
+		"uuid":         uid,
+		"status":       "queued",
+		"api_key":      encryptedKey,
+		"messages":     messagesB64,
+		"base_url":     baseURL,
+		"model":        model,
+		"provider":     provider,
+		"trace_id":     traceID,
+		"user_name":    userName,
+		"user_persona": userPersona,
 	}
 
 	if req.Temperature != nil {
@@ -202,9 +206,6 @@ func enqueueProviderChat(c *gin.Context, req OpenAIProviderRequest, baseURL, pro
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
-	}
-	if req.UserPersona != nil {
-		payload["user_persona"] = *req.UserPersona
 	}
 	if len(req.BotIDs) > 0 {
 		payload["bot_ids"] = req.BotIDs

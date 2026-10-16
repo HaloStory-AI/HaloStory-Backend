@@ -10,7 +10,6 @@ import (
 	"halostory_go_backend/internal/worker/types"
 )
 
-// DecryptKey decrypts the BYOK API key from the queued payload.
 func DecryptKey(encrypted string) (string, *types.WorkerError) {
 	decrypted, err := utils.DecryptBYOKAPIKey(encrypted)
 	if err != nil {
@@ -19,7 +18,6 @@ func DecryptKey(encrypted string) (string, *types.WorkerError) {
 	return decrypted, nil
 }
 
-// DecodeMessagesRaw returns the raw JSON bytes plus parsed messages.
 func DecodeMessagesRaw(b64 string) ([]byte, []byok.Message, *types.WorkerError) {
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
@@ -32,7 +30,6 @@ func DecodeMessagesRaw(b64 string) ([]byte, []byok.Message, *types.WorkerError) 
 	return raw, messages, nil
 }
 
-// HistoryDepth returns the effective history depth (default 15).
 func HistoryDepth(v float64) int {
 	if v == 0 {
 		return 15
@@ -40,8 +37,6 @@ func HistoryDepth(v float64) int {
 	return int(v)
 }
 
-// ContextLimitPtr returns a *int context limit from the float64 field, or nil if 0.
-// Falls back to maxTokens when contextLimit is unset.
 func ContextLimitPtr(contextLimit, maxTokens float64) *int {
 	if contextLimit > 0 {
 		v := int(contextLimit)
@@ -54,7 +49,6 @@ func ContextLimitPtr(contextLimit, maxTokens float64) *int {
 	return nil
 }
 
-// SummaryPtr returns a *string summary or nil if empty.
 func SummaryPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -62,7 +56,6 @@ func SummaryPtr(s string) *string {
 	return &s
 }
 
-// UserPersonaPtr returns a *string persona or nil if empty.
 func UserPersonaPtr(s string) *string {
 	if s == "" {
 		return nil
@@ -70,8 +63,6 @@ func UserPersonaPtr(s string) *string {
 	return &s
 }
 
-// PreparePromptMessages applies lore injection, system prompt injection, and group context
-// in a single reusable pipeline.
 func PreparePromptMessages(
 	messages []byok.Message,
 	botID string,
@@ -79,23 +70,18 @@ func PreparePromptMessages(
 	historyDepth int,
 	contextLimit *int,
 	summary *string,
-	userID uint,
+	userName string,
 	userPersona *string,
 	model string,
 	loreInjection string,
 	botIDs []string,
 	isGroup bool,
 ) []byok.Message {
-	uidPtr := &userID
-	if userID == 0 {
-		uidPtr = nil
-	}
 	messages = byok.InjectByokSystemPromptWithModel(
 		messages, &botID, &lang, &historyDepth, contextLimit,
-		summary, uidPtr, userPersona,
+		summary, userName, userPersona,
 		model,
 	)
-	// Append lore after system prompt injection
 	if loreInjection != "" {
 		for i, m := range messages {
 			if m.Role == "system" {
@@ -110,12 +96,11 @@ func PreparePromptMessages(
 	}
 	if isGroup && len(botIDs) > 1 {
 		primaryBotID := botID
-		messages = byok.InjectGroupContext(messages, botIDs, &primaryBotID, lang, uidPtr)
+		messages = byok.InjectGroupContext(messages, botIDs, &primaryBotID, lang, userName)
 	}
 	return messages
 }
 
-// FormatOpenAIMessages converts internal messages to OpenAI chat messages (vision-aware).
 func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 	out := make([]byok.OpenAIChatMessage, 0, len(messages))
 	for _, m := range messages {
@@ -129,7 +114,6 @@ func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 			for _, p := range m.Content.Parts() {
 				parts = append(parts, p)
 			}
-			// Ensure text part exists; if AsText empty, keep image only
 			hasText := false
 			for _, p := range parts {
 				if p.Type == "text" {
@@ -152,10 +136,9 @@ func FormatOpenAIMessages(messages []byok.Message) []byok.OpenAIChatMessage {
 	return out
 }
 
-// EnsureJSON is a helper to marshal without error (panic on marshal failure is impossible for maps).
 func EnsureJSON(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
 
-var _ = fmt.Sprintf // prevent unused import if needed
+var _ = fmt.Sprintf

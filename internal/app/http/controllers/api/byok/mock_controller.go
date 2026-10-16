@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
 
@@ -16,23 +16,22 @@ import (
 
 type MockChatRequest struct {
 	Messages     []byokSvc.Message `json:"messages" binding:"required"`
-	Model        string         `json:"model"`
-	Temperature  *float64       `json:"temperature,omitempty"`
-	MaxTokens    *int           `json:"max_tokens,omitempty"`
-	TopP         *float64       `json:"top_p,omitempty"`
-	TopK         *int           `json:"top_k,omitempty"`
-	BotID        *string        `json:"bot_id,omitempty"`
-	Language     *string        `json:"language,omitempty"`
-	HistoryDepth *int           `json:"history_depth,omitempty"`
-	IsSummarize  *bool          `json:"is_summarize,omitempty"`
-	IsGroup      *bool          `json:"is_group,omitempty"`
-	Stream       *bool          `json:"stream,omitempty"`
+	Model        string            `json:"model"`
+	Temperature  *float64          `json:"temperature,omitempty"`
+	MaxTokens    *int              `json:"max_tokens,omitempty"`
+	TopP         *float64          `json:"top_p,omitempty"`
+	TopK         *int              `json:"top_k,omitempty"`
+	BotID        *string           `json:"bot_id,omitempty"`
+	Language     *string           `json:"language,omitempty"`
+	HistoryDepth *int              `json:"history_depth,omitempty"`
+	IsSummarize  *bool             `json:"is_summarize,omitempty"`
+	IsGroup      *bool             `json:"is_group,omitempty"`
+	Stream       *bool             `json:"stream,omitempty"`
+	UserName     *string           `json:"user_name,omitempty"`
+	UserPersona  *string           `json:"user_persona,omitempty"`
 }
 
 func MockChat(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
 	var req MockChatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -55,6 +54,14 @@ func MockChat(c *gin.Context) {
 		model = "mock-model"
 	}
 
+	userName := ""
+	if req.UserName != nil {
+		userName = strings.TrimSpace(*req.UserName)
+	}
+	if userName == "" {
+		userName = "Sensei"
+	}
+
 	uid := uuid.New().String()
 	traceID := c.GetHeader("X-Request-Id")
 	if traceID == "" {
@@ -66,7 +73,7 @@ func MockChat(c *gin.Context) {
 	c.Header("X-Request-Id", traceID)
 	c.Header("X-Trace-Id", traceID)
 
-	payload := buildMockPayload(req, user.ID, uid, model)
+	payload := buildMockPayload(req, uid, model, userName)
 	payload["trace_id"] = traceID
 	payloadJSON, _ := json.Marshal(payload)
 
@@ -96,15 +103,17 @@ func MockChat(c *gin.Context) {
 	})
 }
 
-func buildMockPayload(req MockChatRequest, userID uint, uid, model string) map[string]interface{} {
+func buildMockPayload(req MockChatRequest, uid, model, userName string) map[string]interface{} {
 	payload := map[string]interface{}{
-		"uuid":     uid,
-		"status":   "queued",
-		"model":    model,
-		"provider": "mock",
-		"user_id":  userID,
+		"uuid":        uid,
+		"status":      "queued",
+		"model":       model,
+		"provider":    "mock",
+		"user_name":   userName,
 	}
-
+	if req.UserPersona != nil {
+		payload["user_persona"] = *req.UserPersona
+	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
 	}
@@ -135,6 +144,5 @@ func buildMockPayload(req MockChatRequest, userID uint, uid, model string) map[s
 	if req.Stream != nil && *req.Stream {
 		payload["is_stream"] = true
 	}
-
 	return payload
 }

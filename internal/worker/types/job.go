@@ -5,7 +5,6 @@ import (
 	"fmt"
 )
 
-// ReasoningConfig mirrors the reasoning block in the queued payload.
 type ReasoningConfig struct {
 	Enabled   bool    `json:"enabled"`
 	Effort    string  `json:"effort,omitempty"`
@@ -13,15 +12,13 @@ type ReasoningConfig struct {
 	Exclude   bool    `json:"exclude,omitempty"`
 }
 
-// ChatData is the decoded, strongly-typed job payload consumed by handlers.
 type ChatData struct {
 	Status           string           `json:"status"`
 	APIKey           string           `json:"api_key"`
-	Messages         string           `json:"messages"` // base64-encoded JSON array of byok.Message
+	Messages         string           `json:"messages"`
 	Model            string           `json:"model"`
 	Provider         string           `json:"provider"`
 	BaseURL          string           `json:"base_url,omitempty"`
-	UserID           float64          `json:"user_id"`
 	BotID            string           `json:"bot_id"`
 	Language         string           `json:"language,omitempty"`
 	Temperature      float64          `json:"temperature,omitempty"`
@@ -35,6 +32,7 @@ type ChatData struct {
 	HistoryDepth     float64          `json:"history_depth,omitempty"`
 	IsGroup          bool             `json:"is_group,omitempty"`
 	UserPersona      string           `json:"user_persona,omitempty"`
+	UserName         string           `json:"user_name,omitempty"`
 	BotIDs           []string         `json:"bot_ids,omitempty"`
 	ExistingMemories []string         `json:"existing_memories,omitempty"`
 	Reasoning        *ReasoningConfig `json:"reasoning,omitempty"`

@@ -25,7 +25,7 @@ func PruneHistory(messages []Message, depth int, limit *int) []Message {
 		for i := len(messages) - 1; i >= 0; i-- {
 			msgChars := len(messages[i].Content.AsText())
 			if messages[i].Content.HasImage() {
-				msgChars += 85 // vision token estimate per image
+				msgChars += 85
 			}
 			if currentChars+msgChars <= charLimit {
 				pruned = append([]Message{messages[i]}, pruned...)
@@ -40,24 +40,18 @@ func PruneHistory(messages []Message, depth int, limit *int) []Message {
 	return messages
 }
 
-// PruneHistoryV2 token-accurate pruning using tokenizer (Fase 1).
-// depth = max messages to keep (history_depth), tokenBudget = context_limit tokens, model = provider model for routing.
-// Falls back to PruneHistory heuristic if tokenBudget nil or model empty.
 func PruneHistoryV2(messages []Message, depth int, tokenBudget *int, model string) []Message {
 	if len(messages) > depth {
 		messages = messages[len(messages)-depth:]
 	}
 	if tokenBudget == nil || *tokenBudget <= 0 || model == "" {
-		// fallback to heuristic via old function (char*4)
 		return messages
 	}
-	// Convert to tokenizer.ChatMessage
 	tokMsgs := make([]tokenizer.ChatMessage, len(messages))
 	for i, m := range messages {
 		tokMsgs[i] = tokenizer.ChatMessage{Role: m.Role, Content: m.Content.AsText()}
 	}
 	truncated := tokenizer.Default.TruncateToBudget(tokMsgs, *tokenBudget, model)
-	// Convert back - preserve vision by matching on text? fallback to text-only for truncated
 	out := make([]Message, len(truncated))
 	for i, m := range truncated {
 		out[i] = Message{Role: m.Role, Content: NewTextContent(m.Content)}
@@ -65,7 +59,6 @@ func PruneHistoryV2(messages []Message, depth int, tokenBudget *int, model strin
 	return out
 }
 
-// CountTokens helper for controllers/metrics
 func CountTokens(text string, model string) int {
 	if model == "" {
 		model = "gpt-3.5-turbo"
@@ -91,7 +84,7 @@ func InjectByokSystemPrompt(
 	depth *int,
 	contextLimit *int,
 	summary *string,
-	userID *uint,
+	userName string,
 	userPersona *string,
 ) []Message {
 	if botID == nil || *botID == "" {
@@ -112,8 +105,6 @@ func InjectByokSystemPrompt(
 	if depth != nil {
 		historyDepth = *depth
 	}
-	// Fase 1: if USE_V2_PRUNE enabled, PruneHistoryV2 would be used via WithModel variant.
-	// Keep heuristic for backward compat wrapper.
 	messages = PruneHistory(messages, historyDepth, contextLimit)
 
 	systemNote := ""
@@ -129,7 +120,7 @@ func InjectByokSystemPrompt(
 		}
 	}
 
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userID, userPersona)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userName, userPersona)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -145,7 +136,6 @@ func InjectByokSystemPrompt(
 }
 
 // InjectByokSystemPromptWithModel is Fase 1 token-accurate variant.
-// model = provider model for tokenizer routing, contextLimit = token budget (context_limit).
 func InjectByokSystemPromptWithModel(
 	messages []Message,
 	botID *string,
@@ -153,7 +143,7 @@ func InjectByokSystemPromptWithModel(
 	depth *int,
 	contextLimit *int,
 	summary *string,
-	userID *uint,
+	userName string,
 	userPersona *string,
 	model string,
 ) []Message {
@@ -172,20 +162,14 @@ func InjectByokSystemPromptWithModel(
 	if depth != nil {
 		historyDepth = *depth
 	}
-	// Fase 1: token-accurate if model + budget provided and USE_V2_PRUNE
 	useV2 := model != "" && contextLimit != nil && *contextLimit > 0
-	// Allow env toggle: USE_V2_PRUNE=false forces heuristic
 	if envVal := getEnv("USE_V2_PRUNE", "true"); envVal == "false" || envVal == "0" {
 		useV2 = false
 	}
 	if useV2 {
-		// shadow log: compare heuristic vs token
 		heuristic := PruneHistory(append([]Message{}, messages...), historyDepth, contextLimit)
 		tokenized := PruneHistoryV2(messages, historyDepth, contextLimit, model)
-		// log diff sampled
 		if len(heuristic) != len(tokenized) {
-			// use observability if available, else fmt
-			// avoid import cycle: just no-op for now; worker will log
 		}
 		messages = tokenized
 	} else {
@@ -205,7 +189,7 @@ func InjectByokSystemPromptWithModel(
 		}
 	}
 
-	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userID, userPersona)
+	baseSystemPrompt := FormatGlobalPrompt(botID, language, summary, userName, userPersona)
 
 	finalSystemPrompt := baseSystemPrompt
 	if systemNote != "" {
@@ -229,7 +213,7 @@ func getEnv(key, fallback string) string {
 
 func FormatGlobalPrompt(
 	botID, language, summary *string,
-	userID *uint,
+	userName string,
 	userPersona *string,
 ) string {
 	var bot models.Bot
@@ -247,12 +231,8 @@ func FormatGlobalPrompt(
 		lang = *language
 	}
 
-	userName := "Sensei"
-	if userID != nil {
-		var user models.User
-		if err := database.DB.First(&user, *userID).Error; err == nil {
-			userName = user.Name
-		}
+	if strings.TrimSpace(userName) == "" {
+		userName = "Sensei"
 	}
 
 	personality := ""
@@ -269,7 +249,6 @@ func FormatGlobalPrompt(
 		birthdayInfo = fmt.Sprintf("%s's birthday: %s.", charName, bot.Birthday.Format("January 2"))
 	}
 
-	// Fase 5: staff-based prompt templating — USE_PROMPT_ENGINE=true uses JSON non-guardrail + hardcode guardrail (5 kategori tetap hardcode Go)
 	if os.Getenv("USE_PROMPT_ENGINE") == "true" {
 		hasBirthday := bot.Birthday != nil
 		hasSummary := summary != nil && *summary != ""
@@ -289,7 +268,6 @@ func FormatGlobalPrompt(
 			HasBirthday: hasBirthday, HasSummary: hasSummary, HasPersona: hasPersona, HasGroup: false, HasLorebook: false, HasBond: false,
 		}
 		base := promptEngine.RenderNonGuardrail(data)
-		// Guardrail hardcode 5 kategori (tetap di Go, tidak via JSON)
 		var guardrail strings.Builder
 		guardrail.WriteString(fmt.Sprintf("\n[LANGUAGE ENFORCEMENT — CRITICAL] You MUST ONLY use language \"%s\" in ALL your responses. Every single word must be in %s. This overrides all character personality, profile, or previous language settings. Switching to another language is strictly forbidden.\n", lang, lang))
 		return strings.TrimSpace(base) + "\n\n" + strings.TrimSpace(guardrail.String())
@@ -401,7 +379,7 @@ func FormatGlobalPrompt(
 	return output
 }
 
-func BuildGroupContextString(botIDs []string, primaryBotID *string, language string, userID *uint) string {
+func BuildGroupContextString(botIDs []string, primaryBotID *string, language string, userName string) string {
 	if primaryBotID == nil || *primaryBotID == "" || len(botIDs) == 0 {
 		return ""
 	}
@@ -429,12 +407,8 @@ func BuildGroupContextString(botIDs []string, primaryBotID *string, language str
 		}
 	}
 
-	userName := "Sensei"
-	if userID != nil {
-		var user models.User
-		if err := database.DB.First(&user, *userID).Error; err == nil {
-			userName = user.Name
-		}
+	if strings.TrimSpace(userName) == "" {
+		userName = "Sensei"
 	}
 
 	allMembers := append([]string{primaryName}, otherNames...)
@@ -455,8 +429,8 @@ func BuildGroupContextString(botIDs []string, primaryBotID *string, language str
 	return sb.String()
 }
 
-func InjectGroupContext(messages []Message, botIDs []string, primaryBotID *string, language string, userID *uint) []Message {
-	context := BuildGroupContextString(botIDs, primaryBotID, language, userID)
+func InjectGroupContext(messages []Message, botIDs []string, primaryBotID *string, language string, userName string) []Message {
+	context := BuildGroupContextString(botIDs, primaryBotID, language, userName)
 	if context == "" {
 		return messages
 	}

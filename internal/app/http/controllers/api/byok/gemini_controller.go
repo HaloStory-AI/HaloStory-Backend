@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
-	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 	byokSvc "halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/utils"
@@ -17,9 +17,6 @@ import (
 )
 
 func GeminiChat(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
 	var req byokSvc.BYOKRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
@@ -37,6 +34,7 @@ func GeminiChat(c *gin.Context) {
 		return
 	}
 
+	req.SourceIP = c.ClientIP()
 	if err := byokSvc.SanitizeByokInput(&req); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error":   "Input validation failed",
@@ -75,7 +73,18 @@ func GeminiChat(c *gin.Context) {
 	c.Header("X-Request-Id", traceID)
 	c.Header("X-Trace-Id", traceID)
 
-	payload := buildPayload(req, encryptedKey, messagesB64, user.ID, uid)
+	userName := ""
+	if req.UserName != nil {
+		userName = strings.TrimSpace(*req.UserName)
+	}
+	if userName == "" {
+		userName = "Sensei"
+	}
+	payload := buildPayload(req, encryptedKey, messagesB64, uid)
+	payload["user_name"] = userName
+	if req.UserPersona != nil {
+		payload["user_persona"] = *req.UserPersona
+	}
 	payload["trace_id"] = traceID
 
 	payloadJSON, _ := json.Marshal(payload)
@@ -106,7 +115,7 @@ func GeminiChat(c *gin.Context) {
 	})
 }
 
-func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, userID uint, uid string) map[string]interface{} {
+func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, uid string) map[string]interface{} {
 	payload := map[string]interface{}{
 		"uuid":     uid,
 		"status":   "queued",
@@ -114,7 +123,6 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 		"messages": messagesB64,
 		"model":    req.Model,
 		"provider": "gemini",
-		"user_id":  userID,
 	}
 	if req.Temperature != nil {
 		payload["temperature"] = *req.Temperature
@@ -163,9 +171,6 @@ func buildPayload(req byokSvc.BYOKRequest, encryptedKey, messagesB64 string, use
 	}
 	if req.IsGroup != nil {
 		payload["is_group"] = *req.IsGroup
-	}
-	if req.UserPersona != nil {
-		payload["user_persona"] = *req.UserPersona
 	}
 	if len(req.BotIDs) > 0 {
 		payload["bot_ids"] = req.BotIDs

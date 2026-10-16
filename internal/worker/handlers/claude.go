@@ -2,7 +2,6 @@
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"halostory_go_backend/internal/services"
@@ -23,7 +22,6 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 		return nil, 0, werr
 	}
 
-	userID := uint(data.UserID)
 	botID := data.BotID
 	lang := data.Language
 	if lang == "" {
@@ -33,20 +31,13 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 	contextLimit := ContextLimitPtr(data.ContextLimit, data.MaxTokens)
 	summary := SummaryPtr(data.Summary)
 	userPersona := UserPersonaPtr(data.UserPersona)
-
-	if userID > 0 {
-		acquired, err := types.AcquireChatLock(userID, botID, data.IsGroup)
-		if err == nil && !acquired {
-			log.Printf("Worker: Job %s skipped â€” overlapping lock held", uuid)
-			return nil, 0, nil
-		}
-		if err == nil && acquired {
-			defer types.ReleaseChatLock(userID, botID, data.IsGroup)
-		}
+	userName := data.UserName
+	if userName == "" {
+		userName = "Sensei"
 	}
 
 	loreInjection := types.LoreInjection(botID, messages)
-	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userID, userPersona, data.Model, loreInjection, data.BotIDs, data.IsGroup)
+	messages = PreparePromptMessages(messages, botID, lang, historyDepth, contextLimit, summary, userName, userPersona, data.Model, loreInjection, data.BotIDs, data.IsGroup)
 
 	payloadMap := map[string]interface{}{
 		"model":             data.Model,
@@ -58,11 +49,11 @@ func HandleClaude(ctx context.Context, uuid string, data types.ChatData) (map[st
 		"stop":              data.Stop,
 		"reasoning":         data.Reasoning,
 		"bot_id":            data.BotID,
-		"user_id":           data.UserID,
 		"language":          data.Language,
 		"history_depth":     data.HistoryDepth,
 		"is_group":          data.IsGroup,
 		"user_persona":      data.UserPersona,
+		"user_name":         data.UserName,
 		"bot_ids":           data.BotIDs,
 		"existing_memories": data.ExistingMemories,
 	}

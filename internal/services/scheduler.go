@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 import (
 	"bytes"
@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"halostory_go_backend/internal/app/models"
-	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 
 	"github.com/robfig/cron/v3"
@@ -26,24 +25,16 @@ func StartScheduler() *cron.Cron {
 	c.AddFunc("@every 1m", cleanExpiredStories)
 	c.AddFunc("@every 10m", CleanExpiredChatJobs)
 	c.AddFunc("@every 1h", makeStories)
-	// Cron unchanged (rename only): keep legacy schedule, rename handlers to match cron
-	c.AddFunc("0 0 * * *", sendDailyMidnightReport)
-	c.AddFunc("0 0 * * 0", sendWeeklySundayReport)
-	c.AddFunc("0 0 1 * *", sendMonthlyFirstReport)
-	c.AddFunc("0 0 1 1 *", sendYearlyJan1Report)
-	c.AddFunc("0 5 * * *", rollupDaily) // daily rollup 00:05
-	c.AddFunc("0 0 * * 0", cleanupAnalytics)
+	// Analytics crons disabled (authwall cleanup - user_activities removed)
+	c.AddFunc("0 5 * * *", rollupDaily)
 
 	c.Start()
-	log.Println("Scheduler: Started with tasks: clean-stories, clean-chat-jobs, make-stories, analytics")
+	log.Println("Scheduler: Started with tasks: clean-stories, clean-chat-jobs, make-stories")
 	return c
 }
 
 func rollupDaily() {
-	yesterday := time.Now().AddDate(0, 0, -1)
-	if err := RollupDaily(yesterday); err != nil {
-		log.Printf("Analytics: RollupDaily failed: %v", err)
-	}
+	log.Printf("Scheduler: rollupDaily skipped (analytics disabled)")
 }
 
 func cleanExpiredStories() {
@@ -244,219 +235,21 @@ func uploadToLitterbox(data []byte, filename string) (string, error) {
 	return strings.TrimSpace(string(body)), nil
 }
 
-func sendTelegramMessage(message string) {
-	token := config.Env("TELEGRAM_BOT_TOKEN", "")
-	chatID := config.Env("TELEGRAM_USER_ID", "")
+// Analytics stubbed (authwall cleanup)
+func sendTelegramMessage(message string) { log.Println("Analytics: disabled, skip send") }
+func buildHourlyReport() string { return "" }
+func buildDailyReport() string { return "" }
+func buildWeeklyReport() string { return "" }
+func buildMonthlyReport() string { return "" }
+func sendHourlyAnalytics() {}
+func sendDailyAnalytics() {}
+func sendWeeklyAnalytics() {}
+func sendMonthlyAnalytics() {}
+func sendDailyMidnightReport() { log.Println("Analytics: disabled") }
+func sendWeeklySundayReport() { log.Println("Analytics: disabled") }
+func sendMonthlyFirstReport() { log.Println("Analytics: disabled") }
+func sendYearlyJan1Report() { log.Println("Analytics: disabled") }
+func cleanupAnalytics() { log.Println("Analytics: disabled") }
 
-	if token == "" || chatID == "" {
-		log.Println("Analytics: Telegram credentials not configured")
-		return
-	}
 
-	payload := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       message,
-		"parse_mode": "HTML",
-	}
-	body, _ := json.Marshal(payload)
 
-	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
-	resp, err := schedulerHTTP.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		log.Printf("Analytics: Failed to send Telegram message: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	log.Println("Analytics: Report sent to Telegram")
-}
-
-type analyticsRow struct {
-	Period string `gorm:"column:period"`
-	Count  int    `gorm:"column:count"`
-}
-
-func buildHourlyReport() string {
-	var rows []analyticsRow
-	database.DB.Raw(
-		`SELECT HOUR(created_at) as period, COUNT(DISTINCT user_id) as count
-		 FROM user_activities
-		 WHERE created_at >= NOW() - INTERVAL 24 HOUR
-		 GROUP BY HOUR(created_at)
-		 ORDER BY period`,
-	).Scan(&rows)
-
-	data := make(map[int]int)
-	total := 0
-	for _, r := range rows {
-		var h int
-		fmt.Sscanf(r.Period, "%d", &h)
-		data[h] = r.Count
-		total += r.Count
-	}
-
-	lines := []string{"<b>📊 Analytics Report — Hourly (24h)</b>", "━━━━━━━━━━━━━━━━━━━━━━━"}
-	now := time.Now()
-	for i := 23; i >= 0; i-- {
-		h := now.Add(-time.Duration(i) * time.Hour).Hour()
-		count := data[h]
-		lines = append(lines, fmt.Sprintf("%02d:00 → %d users", h, count))
-	}
-	lines = append(lines, "━━━━━━━━━━━━━━━━━━━━━━━")
-	lines = append(lines, fmt.Sprintf("<b>Total unique: %d users</b>", total))
-
-	return strings.Join(lines, "\n")
-}
-
-func buildDailyReport() string {
-	var rows []analyticsRow
-	database.DB.Raw(
-		`SELECT DATE(created_at) as period, COUNT(DISTINCT user_id) as count
-		 FROM user_activities
-		 WHERE created_at >= CURDATE() - INTERVAL 6 DAY
-		 GROUP BY DATE(created_at)
-		 ORDER BY period`,
-	).Scan(&rows)
-
-	data := make(map[string]int)
-	total := 0
-	for _, r := range rows {
-		data[r.Period] = r.Count
-		total += r.Count
-	}
-
-	lines := []string{"<b>📊 Analytics Report — Daily (7 days)</b>", "━━━━━━━━━━━━━━━━━━━━━━━"}
-	now := time.Now()
-	for i := 6; i >= 0; i-- {
-		day := now.AddDate(0, 0, -i)
-		key := day.Format("2006-01-02")
-		count := data[key]
-		lines = append(lines, fmt.Sprintf("%s → %d users", day.Format("Mon, 02 Jan"), count))
-	}
-	lines = append(lines, "━━━━━━━━━━━━━━━━━━━━━━━")
-	lines = append(lines, fmt.Sprintf("<b>Total unique: %d users</b>", total))
-
-	return strings.Join(lines, "\n")
-}
-
-func buildWeeklyReport() string {
-	var rows []analyticsRow
-	database.DB.Raw(
-		`SELECT YEARWEEK(created_at) as period, COUNT(DISTINCT user_id) as count
-		 FROM user_activities
-		 WHERE created_at >= CURDATE() - INTERVAL (WEEKDAY(CURDATE()) + 21) DAY
-		 GROUP BY YEARWEEK(created_at)
-		 ORDER BY period`,
-	).Scan(&rows)
-
-	data := make(map[string]int)
-	for _, r := range rows {
-		data[r.Period] = r.Count
-	}
-
-	total := 0
-	lines := []string{"<b>📊 Analytics Report — Weekly (4 weeks)</b>", "━━━━━━━━━━━━━━━━━━━━━━━"}
-	now := time.Now()
-	for i := 3; i >= 0; i-- {
-		week := now.AddDate(0, 0, -i*7)
-		yw := week.Format("2006-02") // YEARWEEK format
-		count := data[yw]
-		if count == 0 {
-			_, ywNum := week.ISOWeek()
-			altKey := fmt.Sprintf("%d%02d", week.Year(), ywNum)
-			count = data[altKey]
-		}
-		total += count
-		lines = append(lines, fmt.Sprintf("Week %s, %d → %d users", week.Format("02"), week.Year(), count))
-	}
-	lines = append(lines, "━━━━━━━━━━━━━━━━━━━━━━━")
-	lines = append(lines, fmt.Sprintf("<b>Total unique: %d users</b>", total))
-
-	return strings.Join(lines, "\n")
-}
-
-func buildMonthlyReport() string {
-	var rows []analyticsRow
-	database.DB.Raw(
-		`SELECT DATE_FORMAT(created_at, '%Y-%m') as period, COUNT(DISTINCT user_id) as count
-		 FROM user_activities
-		 WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 11 MONTH) - INTERVAL (DAY(CURDATE()) - 1) DAY
-		 GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-		 ORDER BY period`,
-	).Scan(&rows)
-
-	data := make(map[string]int)
-	total := 0
-	for _, r := range rows {
-		data[r.Period] = r.Count
-		total += r.Count
-	}
-
-	lines := []string{"<b>📊 Analytics Report — Monthly (12 months)</b>", "━━━━━━━━━━━━━━━━━━━━━━━"}
-	now := time.Now()
-	for i := 11; i >= 0; i-- {
-		month := now.AddDate(0, -i, 0)
-		key := month.Format("2006-01")
-		count := data[key]
-		lines = append(lines, fmt.Sprintf("%s → %d users", month.Format("Jan 2006"), count))
-	}
-	lines = append(lines, "━━━━━━━━━━━━━━━━━━━━━━━")
-	lines = append(lines, fmt.Sprintf("<b>Total unique: %d users</b>", total))
-
-	return strings.Join(lines, "\n")
-}
-
-func sendHourlyAnalytics() { sendDailyMidnightReport() }
-func sendDailyAnalytics() { sendWeeklySundayReport() }
-func sendWeeklyAnalytics() { sendMonthlyFirstReport() }
-func sendMonthlyAnalytics() { sendYearlyJan1Report() }
-
-func sendDailyMidnightReport() {
-	log.Println("Analytics: Sending daily-midnight (24h) report...")
-	msg := buildHourlyReport()
-	sendTelegramMessage(msg)
-}
-
-func sendWeeklySundayReport() {
-	log.Println("Analytics: Sending weekly-Sunday (7d) report...")
-	msg := buildDailyReport()
-	sendTelegramMessage(msg)
-}
-
-func sendMonthlyFirstReport() {
-	log.Println("Analytics: Sending monthly-first (4w) report...")
-	msg := buildWeeklyReport()
-	sendTelegramMessage(msg)
-}
-
-func sendYearlyJan1Report() {
-	log.Println("Analytics: Sending yearly-Jan1 (12m) report...")
-	msg := buildMonthlyReport()
-	sendTelegramMessage(msg)
-}
-
-func cleanupAnalytics() {
-	log.Println("Analytics: Cleaning up old activity records (90d raw, 730d rollup)...")
-
-	result := database.DB.Exec(
-		"DELETE FROM user_activities WHERE created_at < NOW() - INTERVAL 90 DAY",
-	)
-
-	if result.Error != nil {
-		log.Printf("Analytics: Error cleaning up: %v", result.Error)
-		return
-	}
-
-	if result.RowsAffected > 0 {
-		log.Printf("Analytics: Deleted %d old activity records", result.RowsAffected)
-	} else {
-		log.Println("Analytics: No old activities found")
-	}
-
-	r2 := database.DB.Exec("DELETE FROM activity_daily_rollups WHERE date < CURDATE() - INTERVAL 730 DAY")
-	if r2.Error != nil {
-		log.Printf("Analytics: Error cleaning rollups: %v", r2.Error)
-	} else if r2.RowsAffected > 0 {
-		log.Printf("Analytics: Deleted %d old rollup rows", r2.RowsAffected)
-	}
-}

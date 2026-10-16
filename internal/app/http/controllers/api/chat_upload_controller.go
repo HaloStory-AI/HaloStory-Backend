@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/services"
 
 	"github.com/gin-gonic/gin"
@@ -14,14 +13,6 @@ import (
 )
 
 func ChatUpload(c *gin.Context) {
-	userVal, _ := c.Get("user")
-	user := userVal.(models.User)
-
-	// Sensei hybrid gate: block upload
-	if user.Role == "Sensei" {
-		c.JSON(http.StatusForbidden, gin.H{"message": "Sensei tidak dapat mengirim foto/sticker"})
-		return
-	}
 	if !services.S3Enabled() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Storage not configured, use base64 fallback", "fallback": "base64"})
 		return
@@ -54,7 +45,8 @@ func ChatUpload(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to read file"})
 		return
 	}
-	key := fmt.Sprintf("chat-uploads/%d/%s%s", user.ID, uuid.New().String(), ext)
+	// Public: no user binding, use random prefix
+	key := fmt.Sprintf("chat-uploads/public/%s%s", uuid.New().String(), ext)
 	if err := services.PutChatUploadObject(key, data, mime); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to upload: " + err.Error()})
 		return

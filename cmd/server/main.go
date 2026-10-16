@@ -30,9 +30,6 @@ func main() {
 	// Koneksi ke Redis
 	services.InitRedis()
 
-	// Setup Google OAUTH2
-	services.InitGoogleAuthorization()
-
 	// Set Gin mode (default release — set GIN_MODE=debug di .env untuk dev)
 	gin.SetMode(config.Env("GIN_MODE", "release"))
 
