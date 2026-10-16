@@ -108,12 +108,6 @@ func SetupAPI(r *gin.Engine) {
 	protected.POST("/user/backup", apiControllers.BackupStore)
 	protected.GET("/user/restore", apiControllers.BackupRestore)
 
-	// Drive Backup Routes (no email verification required — same as Laravel)
-	protected.POST("/user/drive-backup", apiControllers.DriveBackupStore)
-	protected.POST("/user/drive-delete", apiControllers.DriveDeleteBackup)
-	protected.POST("/user/drive-download", apiControllers.DriveDownloadBackup)
-	protected.GET("/user/drive-list", apiControllers.DriveBackupList)
-
 	// Cek Apakah User ini Sudah Set Password Atau Belum ( Untuk Endpoint Ubah Password Nanti )
 	// Supaya bisa Hilang / Munculkan Input Current Password yang Opsional Untuk Login Google ( kalo belum punya akun biasa )
 	// Atau memeriksa apakah akun user terkait dengan akun google
@@ -150,14 +144,6 @@ func SetupAPI(r *gin.Engine) {
 	{
 		// Bot Routes
 		verified.GET("/bots", apiControllers.BotIndex)
-
-		// ─── System AI Chat (server-side keys) ───
-		verified.POST("/ai/chat/system", apiControllers.SystemChat)
-		verified.POST("/ai/summarize", apiControllers.Summarize)
-		verified.GET("/ai/system-prompt/:bot_id", apiControllers.GetSystemPrompt)
-		// Fase 1: tokenizer debug
-		verified.GET("/ai/tokenize", apiControllers.Tokenize)
-		verified.POST("/ai/tokenize", apiControllers.Tokenize)
 
 		// ─── Call ( WEBRTC ) - Belum di Implementasi ───
 		// verified.GET("")

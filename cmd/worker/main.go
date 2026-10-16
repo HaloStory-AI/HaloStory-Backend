@@ -64,15 +64,13 @@ func main() {
 	services.InitRedis()
 
 	maxWorkersBYOK := 100
-	maxWorkersSystem := 30
 	if v := os.Getenv("WORKER_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			maxWorkersBYOK = n
 		}
 	}
 	mainSem := make(chan struct{}, maxWorkersBYOK)
-	sysSem := make(chan struct{}, maxWorkersSystem)
-	log.Printf("Worker service starting — BYOK concurrency: %d, System AI concurrency: %d (free), VIP routed to BYOK pool", maxWorkersBYOK, maxWorkersSystem)
+	log.Printf("Worker service starting — BYOK concurrency: %d", maxWorkersBYOK)
 	_ = httpClient
 
 	go func() {
@@ -113,22 +111,7 @@ func main() {
 				continue
 			}
 			backoff = 100 * time.Millisecond
-
-			// Route System AI free to sysSem, VIP/priority to mainSem
-			var probe struct {
-				Provider   string `json:"provider"`
-				IsPriority bool   `json:"is_priority"`
-			}
-			_ = json.Unmarshal(data, &probe)
-			if probe.Provider == "system-ai" {
-				if probe.IsPriority {
-					dispatchJob(data, mainSem, "main")
-				} else {
-					dispatchJob(data, sysSem, "sys")
-				}
-			} else {
-				dispatchJob(data, mainSem, "main")
-			}
+			dispatchJob(data, mainSem, "main")
 		}
 	}()
 

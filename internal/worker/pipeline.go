@@ -13,13 +13,11 @@ import (
 	"halostory_go_backend/internal/services/byok"
 	"halostory_go_backend/internal/services/llm"
 	"halostory_go_backend/internal/services/observability"
-	"halostory_go_backend/internal/services/systemai"
 	"halostory_go_backend/internal/worker/handlers"
 	"halostory_go_backend/internal/worker/summarizer"
 )
 
 // ProcessJob is the unified entry point for a single queued job.
-// It handles decode, observability, activity logging, dispatch, and completion.
 func ProcessJob(rawData []byte) {
 	start := time.Now()
 	data, uuid, traceID, err := DecodeChatData(rawData)
@@ -39,23 +37,20 @@ func ProcessJob(rawData []byte) {
 		observability.Info("worker.job.start", "trace_id", traceID, "uuid", uuid, "provider", data.Provider)
 	}
 
-	// Store initial payload
 	rawJSON, _ := json.Marshal(map[string]interface{}{
 		"uuid":     uuid,
 		"trace_id": traceID,
 		"provider": data.Provider,
 	})
-	_ = rawJSON // for later trace preservation
+	_ = rawJSON
 	if err := services.StoreChatResult(uuid, rawData, 10*time.Minute); err != nil {
 		log.Printf("Worker: Failed to store initial payload for %s: %v", uuid, err)
 	}
 
-	// Mark processing
 	data.Status = "processing"
 	updateJSON, _ := json.Marshal(data)
 	services.StoreProcessingResilient(uuid, updateJSON)
 
-	// Fire-and-forget activity
 	if data.UserID > 0 {
 		userID := uint(data.UserID)
 		at := "chat"
@@ -76,7 +71,6 @@ func ProcessJob(rawData []byte) {
 		}(userID, at, botID, prov)
 	}
 
-	// Dispatcher validate
 	if llm.IsDispatcherEnabled() {
 		_ = llm.Default.Validate(data.Provider, data.Model, &data.BaseURL)
 		if !llm.Allow(data.Provider, data.Model) {
@@ -84,7 +78,6 @@ func ProcessJob(rawData []byte) {
 		}
 	}
 
-	// Dispatch by provider
 	if data.IsSummarize {
 		handleSummarize(uuid, data, traceID)
 	} else {
@@ -135,12 +128,6 @@ func handleSummarize(uuid string, data ChatData, traceID string) {
 		var messages []byok.Message
 		_ = json.Unmarshal(messagesJSON, &messages)
 		result, statusCode = summarizer.HandleClaude(data, decrypted, messages, messagesJSON)
-	case "system-ai":
-		messagesJSON, _ := base64.StdEncoding.DecodeString(data.Messages)
-		var messages []byok.Message
-		_ = json.Unmarshal(messagesJSON, &messages)
-		userID := uint(data.UserID)
-		result, statusCode = summarizer.HandleSystemAI(data, messages, userID)
 	default:
 		markError(uuid, "Unsupported provider: "+data.Provider, 400)
 		return
@@ -154,7 +141,6 @@ func handleChat(uuid string, data ChatData, traceID string) {
 	var resp map[string]interface{}
 	var statusCode int
 	var werr *WorkerError
-	var systemAIUserID uint
 
 	switch data.Provider {
 	case "openai-compatible", "mistral", "deepseek", "openrouter", "zai":
@@ -163,8 +149,6 @@ func handleChat(uuid string, data ChatData, traceID string) {
 		resp, statusCode, werr = handlers.HandleClaude(ctx, uuid, data)
 	case "gemini":
 		resp, statusCode, werr = handlers.HandleGemini(ctx, uuid, data)
-	case "system-ai":
-		resp, statusCode, werr, systemAIUserID = handlers.HandleSystemAI(ctx, uuid, data)
 	default:
 		markError(uuid, "Unsupported provider: "+data.Provider, 400)
 		return
@@ -175,15 +159,10 @@ func handleChat(uuid string, data ChatData, traceID string) {
 		return
 	}
 	if resp == nil && statusCode == 0 {
-		// Dropped due to overlapping lock — no completion
 		return
 	}
 
-	if data.Provider == "system-ai" {
-		markSystemAICompleted(uuid, resp, statusCode, systemAIUserID)
-	} else {
-		markCompleted(uuid, resp, statusCode)
-	}
+	markCompleted(uuid, resp, statusCode)
 }
 
 func markCompleted(uuid string, response interface{}, statusCode int) {
@@ -201,49 +180,4 @@ func markError(uuid, message string, statusCode int) {
 func markSummaryCompleted(uuid string, result SummaryResult, statusCode int) {
 	_ = services.MarkChatCompletedResilient(uuid, result.Marshal(), statusCode)
 	log.Printf("Worker: Completed summarization job %s with status %d", uuid, statusCode)
-}
-
-func markSystemAICompleted(uuid string, response map[string]interface{}, statusCode int, userID uint) {
-	payload := map[string]interface{}{
-		"status":      "completed",
-		"response":    response,
-		"status_code": statusCode,
-	}
-	if existing, err := services.GetChatResultResilient(uuid); err == nil {
-		var existingMap map[string]interface{}
-		if json.Unmarshal(existing, &existingMap) == nil {
-			if tid, ok := existingMap["trace_id"].(string); ok && tid != "" {
-				payload["trace_id"] = tid
-			}
-		}
-	}
-	jsonBytes, _ := json.Marshal(payload)
-	if err := services.StoreChatResult(uuid, jsonBytes, 10*time.Minute); err != nil {
-		inner, _ := json.Marshal(response)
-		if derr := services.MarkChatCompletedFallback(uuid, json.RawMessage(inner), statusCode); derr != nil {
-			log.Printf("Worker: System AI fallback store gagal untuk %s: %v", uuid, derr)
-		}
-	}
-	log.Printf("Worker: Completed system AI job %s with status %d", uuid, statusCode)
-
-	// Drain pending queue
-	nextUUID, err := services.PopPending(userID)
-	if err != nil || nextUUID == "" {
-		return
-	}
-	nextData, err := services.GetChatResultResilient(nextUUID)
-	if err != nil {
-		log.Printf("Worker: Pending data for %s not found, skipping", nextUUID)
-		return
-	}
-	var nextPayload map[string]interface{}
-	if err := json.Unmarshal(nextData, &nextPayload); err != nil {
-		log.Printf("Worker: Failed to parse pending payload for %s: %v", nextUUID, err)
-		return
-	}
-	nextPayload["uuid"] = nextUUID
-	enqBytes, _ := json.Marshal(nextPayload)
-	_ = services.EnqueueResilient("ai-chat", nextUUID, enqBytes)
-	_ = services.SetCooldown(userID, systemai.CooldownDuration)
-	log.Printf("Worker: Dispatched pending job %s from queue", nextUUID)
 }

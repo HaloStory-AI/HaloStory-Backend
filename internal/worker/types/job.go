@@ -14,7 +14,6 @@ type ReasoningConfig struct {
 }
 
 // ChatData is the decoded, strongly-typed job payload consumed by handlers.
-// Field names match the JSON keys enqueued by the API server.
 type ChatData struct {
 	Status           string           `json:"status"`
 	APIKey           string           `json:"api_key"`
@@ -46,8 +45,6 @@ type ChatData struct {
 	IsStream         bool             `json:"is_stream,omitempty"`
 }
 
-// DecodeChatData decodes the raw job map into a ChatData struct.
-// rawData is the original []byte payload (so we avoid double-marshal when possible).
 func DecodeChatData(rawData []byte) (ChatData, string, string, error) {
 	var payload map[string]interface{}
 	if err := json.Unmarshal(rawData, &payload); err != nil {
@@ -55,32 +52,10 @@ func DecodeChatData(rawData []byte) (ChatData, string, string, error) {
 	}
 	uuid, _ := payload["uuid"].(string)
 	traceID, _ := payload["trace_id"].(string)
-
-	// Re-marshal then unmarshal into ChatData to reuse json tags.
 	jb, _ := json.Marshal(payload)
 	var data ChatData
 	if err := json.Unmarshal(jb, &data); err != nil {
 		return ChatData{}, uuid, traceID, fmt.Errorf("parse chat data: %w", err)
 	}
 	return data, uuid, traceID, nil
-}
-
-func isSystemAIJob(raw []byte) bool {
-	var p struct {
-		Provider string `json:"provider"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return false
-	}
-	return p.Provider == "system-ai"
-}
-
-func jobIsPriority(raw []byte) bool {
-	var p struct {
-		IsPriority bool `json:"is_priority"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return false
-	}
-	return p.IsPriority
 }

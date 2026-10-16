@@ -71,10 +71,6 @@ func NewRegistry() *Registry {
 	r.providers["mock"] = ProviderSpec{
 		ID: "mock", Label: "Mock", Capabilities: Capability{Stream: false, SystemRole: false, MaxTokens: 1024},
 	}
-	r.providers["system-ai"] = ProviderSpec{
-		ID: "system-ai", Label: "System AI", BaseURL: "https://router.my-bini.my.id/v1",
-		Capabilities: Capability{Stream: false, SystemRole: true, MaxTokens: 32000, ContextWindow: 32000},
-	}
 	return r
 }
 

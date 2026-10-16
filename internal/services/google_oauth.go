@@ -1,21 +1,17 @@
 package services
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"halostory_go_backend/internal/app/models"
 	"halostory_go_backend/internal/config"
 	"halostory_go_backend/internal/database"
 
 	"golang.org/x/oauth2"
-	drive "google.golang.org/api/drive/v3"
 	googleoauth2 "google.golang.org/api/oauth2/v2"
 	"google.golang.org/api/option"
 )
@@ -129,7 +125,7 @@ func getGoogleIdentityService(ctx context.Context, token *oauth2.Token) (*google
 	if GOOGLE_OAUTH == nil {
 		return nil, fmt.Errorf("GOOGLE_OAUTH belum di setup! periksa kembali env anda.")
 	}
-	
+
 	client := GetOAuthClient(ctx, token)
 	oauth2Service, err := googleoauth2.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
@@ -155,107 +151,4 @@ func GetGoogleIdentity(ctx context.Context, token *oauth2.Token) (GoogleUserInfo
 		VerifiedEmail: *userInfo.VerifiedEmail,
 		Name:          userInfo.Name,
 	}, nil
-}
-
-func getDriveService(ctx context.Context, token *oauth2.Token) (*drive.Service, error) {
-	if GOOGLE_OAUTH == nil {
-		return nil, fmt.Errorf("GOOGLE_OAUTH belum di-setup! periksa kembali env anda")
-	}
-
-	client := GetOAuthClient(ctx, token)
-	driveService, err := drive.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		return nil, fmt.Errorf("gagal membuat drive service: %w", err)
-	}
-
-	return driveService, nil
-}
-
-func DriveUploadBackup(ctx context.Context, token *oauth2.Token, encryptedData string) (bool, error) {
-	srv, err := getDriveService(ctx, token)
-	if err != nil {
-		return false, err
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	timestamp := strings.NewReplacer(":", "-", ".", "-").Replace(now)
-	fileName := fmt.Sprintf("HaloStory_Backup_%s.hsai.enc", timestamp)
-
-	fileMetadata := &drive.File{
-		Name:        fileName,
-		Parents:     []string{"appDataFolder"},
-		MimeType:    "application/octet-stream",
-		Description: fmt.Sprintf("HaloStory backup created at %s", timestamp),
-	}
-
-	mediaReader := bytes.NewReader([]byte(encryptedData))
-
-	_, err = srv.Files.Create(fileMetadata).
-		Media(mediaReader).
-		Context(ctx).
-		Do()
-
-	if err != nil {
-		return false, fmt.Errorf("gagal upload backup: %w", err)
-	}
-
-	return true, nil
-}
-
-func DriveDownloadBackup(ctx context.Context, token *oauth2.Token, fileId string) (string, error) {
-	srv, err := getDriveService(ctx, token)
-	if err != nil {
-		return "", err
-	}
-
-	res, err := srv.Files.Get(fileId).
-		Download()
-	if err != nil {
-		return "", fmt.Errorf("gagal download backup: %w", err)
-	}
-	defer res.Body.Close()
-
-	buf := new(bytes.Buffer)
-	if _, err := io.Copy(buf, res.Body); err != nil {
-		return "", fmt.Errorf("gagal membaca stream file: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-func DriveDeleteBackup(ctx context.Context, token *oauth2.Token, fileId string) (bool, error) {
-	srv, err := getDriveService(ctx, token)
-	if err != nil {
-		return false, err
-	}
-
-	err = srv.Files.Delete(fileId).
-		Context(ctx).
-		Do()
-	if err != nil {
-		return false, fmt.Errorf("gagal menghapus backup: %w", err)
-	}
-
-	return true, nil
-}
-
-func DriveListBackups(ctx context.Context, token *oauth2.Token) ([]*drive.File, error) {
-	srv, err := getDriveService(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := srv.Files.List().
-		Q("name contains 'HaloStory_Backup_' and trashed = false").
-		OrderBy("createdTime desc").
-		PageSize(20).
-		Spaces("appDataFolder").
-		Context(ctx).
-		Do()
-
-	if err != nil {
-		return nil, fmt.Errorf("gagal mengambil daftar backup: %w", err)
-	}
-
-	return res.Files, nil
 }

@@ -97,35 +97,4 @@ func TestQueue_UpdateChatStatus(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestQueue_Cooldown(t *testing.T) {
-	skipIfNoRedis(t)
 
-	active, err := CheckCooldown(999)
-	require.NoError(t, err)
-	assert.False(t, active)
-
-	err = SetCooldown(999, 0)
-	require.NoError(t, err)
-
-	active, err = CheckCooldown(999)
-	require.NoError(t, err)
-	assert.True(t, active)
-}
-
-func TestQueue_Pending(t *testing.T) {
-	skipIfNoRedis(t)
-
-	err := PushPending(999, "uuid-1")
-	require.NoError(t, err)
-
-	err = PushPending(999, "uuid-2")
-	require.NoError(t, err)
-
-	uuid, err := PopPending(999)
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-1", uuid)
-
-	uuid, err = PopPending(999)
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-2", uuid)
-}

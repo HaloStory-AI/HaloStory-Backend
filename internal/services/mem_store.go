@@ -1,70 +1,13 @@
 package services
 
-// mem_store.go — in-memory fallback store untuk cooldown, pending queue,
-// dan streaming Pub/Sub saat Redis tidak tersedia.
-// Semua struktur ini thread-safe dan diinisialisasi saat package di-load.
+// mem_store.go — in-memory fallback store untuk streaming Pub/Sub saat Redis
+// tidak tersedia. Thread-safe, diinisialisasi saat package di-load.
 
 import (
 	"context"
 	"sync"
 	"time"
 )
-
-// ─── Cooldown store ───────────────────────────────────────────────────────────
-
-type memCooldownStore struct {
-	mu    sync.Mutex
-	items map[string]time.Time // key → expiry
-}
-
-func (s *memCooldownStore) Set(key string, ttl time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.items[key] = time.Now().Add(ttl)
-}
-
-func (s *memCooldownStore) Has(key string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	exp, ok := s.items[key]
-	if !ok {
-		return false
-	}
-	if time.Now().After(exp) {
-		delete(s.items, key)
-		return false
-	}
-	return true
-}
-
-var memCooldown = &memCooldownStore{items: make(map[string]time.Time)}
-
-// ─── Pending queue store ─────────────────────────────────────────────────────
-
-type memPendingStore struct {
-	mu     sync.Mutex
-	queues map[string][]string // key → FIFO list of UUIDs
-}
-
-func (s *memPendingStore) Push(key, uuid string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.queues[key] = append(s.queues[key], uuid)
-}
-
-func (s *memPendingStore) Pop(key string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	q := s.queues[key]
-	if len(q) == 0 {
-		return ""
-	}
-	val := q[0]
-	s.queues[key] = q[1:]
-	return val
-}
-
-var memPending = &memPendingStore{queues: make(map[string][]string)}
 
 // ─── Streaming store (in-process Pub/Sub + buffer) ───────────────────────────
 

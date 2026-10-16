@@ -95,57 +95,6 @@ func MarkChatCompleted(uuid string, response json.RawMessage, statusCode int) er
 	return err
 }
 
-// ─── Cooldown & Pending: Redis first, in-memory fallback ───
-// Saat Redis down, cooldown dan pending queue dilayani oleh memCooldown dan
-// memPending (lihat mem_store.go). Data bersifat per-proses; multi-instance
-// tanpa Redis tidak berbagi state cooldown — cukup untuk single-VPS.
-
-func SetCooldown(userID uint, ttl time.Duration) error {
-	key := fmt.Sprintf("ai-chat-cooldown:%d", userID)
-	if err := RedisClient.SetEx(RedisCtx, key, "1", ttl).Err(); err != nil {
-		log.Printf("SetCooldown: Redis error, using in-memory fallback: %v", err)
-		memCooldown.Set(key, ttl)
-		return nil
-	}
-	return nil
-}
-
-func CheckCooldown(userID uint) (bool, error) {
-	key := fmt.Sprintf("ai-chat-cooldown:%d", userID)
-	_, err := RedisClient.Get(RedisCtx, key).Result()
-	if err == redis.Nil {
-		return false, nil
-	}
-	if err != nil {
-		// Redis down → cek in-memory
-		return memCooldown.Has(key), nil
-	}
-	return true, nil
-}
-
-func PushPending(userID uint, uuid string) error {
-	key := fmt.Sprintf("ai-chat-pending:%d", userID)
-	if err := RedisClient.RPush(RedisCtx, key, uuid).Err(); err != nil {
-		log.Printf("PushPending: Redis error, using in-memory fallback: %v", err)
-		memPending.Push(key, uuid)
-		return nil
-	}
-	return nil
-}
-
-func PopPending(userID uint) (string, error) {
-	key := fmt.Sprintf("ai-chat-pending:%d", userID)
-	val, err := RedisClient.LPop(RedisCtx, key).Result()
-	if err == redis.Nil {
-		return "", nil
-	}
-	if err != nil {
-		// Redis down → cek in-memory
-		return memPending.Pop(key), nil
-	}
-	return val, nil
-}
-
 // ─── Streaming SSE: Redis Pub/Sub + buffer, fallback in-process ───
 // Saat Redis sehat: delta dikirim via PUBLISH + di-buffer di List Redis.
 // Saat Redis down: delta dikirim lewat memStream (in-process channel store).
